@@ -1,8 +1,21 @@
 import { useState } from "react";
 import {
-  ChevronRight, ChevronDown, FileText, Folder, FolderOpen,
-  Plus, FolderPlus, Trash2, Pencil,
+  ChevronRight,
+  ChevronDown,
+  FileText,
+  Folder,
+  FolderOpen,
+  Plus,
+  FolderPlus,
+  Trash2,
+  Pencil,
 } from "lucide-react";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+  ContextMenuContent,
+  ContextMenuItem,
+} from "@/components/ui/context-menu";
 import { FileNode } from "@/lib/sample-contracts";
 
 interface FileExplorerProps {
@@ -29,8 +42,12 @@ function InlineInput({
   initialValue?: string;
 }) {
   const [value, setValue] = useState(initialValue);
+
   return (
-    <div className="flex items-center px-2 py-0.5" style={{ paddingLeft: `${depth * 12 + 20}px` }}>
+    <div
+      className="flex items-center px-2 py-0.5"
+      style={{ paddingLeft: `${depth * 12 + 20}px` }}
+    >
       <input
         autoFocus
         value={value}
@@ -39,7 +56,10 @@ function InlineInput({
           if (e.key === "Enter" && value.trim()) onSubmit(value.trim());
           if (e.key === "Escape") onCancel();
         }}
-        onBlur={() => { if (value.trim()) onSubmit(value.trim()); else onCancel(); }}
+        onBlur={() => {
+          if (value.trim()) onSubmit(value.trim());
+          else onCancel();
+        }}
         placeholder={placeholder}
         className="w-full bg-muted border border-primary rounded px-1.5 py-0.5 text-xs font-mono text-foreground outline-none"
       />
@@ -48,8 +68,15 @@ function InlineInput({
 }
 
 function FileTreeItem({
-  node, depth, path, onFileSelect, activeFilePath,
-  onCreateFile, onCreateFolder, onDeleteNode, onRenameNode,
+  node,
+  depth,
+  path,
+  onFileSelect,
+  activeFilePath,
+  onCreateFile,
+  onCreateFolder,
+  onDeleteNode,
+  onRenameNode,
 }: {
   node: FileNode;
   depth: number;
@@ -64,8 +91,16 @@ function FileTreeItem({
   const [isOpen, setIsOpen] = useState(true);
   const [creating, setCreating] = useState<"file" | "folder" | null>(null);
   const [renaming, setRenaming] = useState(false);
+
   const currentPath = [...path, node.name];
   const isActive = activeFilePath.join("/") === currentPath.join("/");
+
+  const handleDelete = () => {
+    const label = node.type === "folder" ? "folder" : "file";
+    if (window.confirm(`Are you sure you want to delete this ${label}?`)) {
+      onDeleteNode(currentPath);
+    }
+  };
 
   if (renaming) {
     return (
@@ -85,58 +120,95 @@ function FileTreeItem({
   if (node.type === "folder") {
     return (
       <div>
-        <div
-          className="group flex items-center w-full hover:bg-sidebar-accent transition-colors"
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
-        >
-          <button
-            onClick={() => setIsOpen(!isOpen)}
-            onDoubleClick={() => setRenaming(true)}
-            className="flex items-center gap-1 flex-1 px-2 py-1 text-sm min-w-0"
-          >
-            {isOpen ? (
-              <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-            )}
-            {isOpen ? (
-              <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
-            ) : (
-              <Folder className="h-4 w-4 shrink-0 text-primary" />
-            )}
-            <span className="truncate font-mono text-sidebar-foreground">{node.name}</span>
-          </button>
-          <div className="hidden group-hover:flex items-center shrink-0 pr-1 gap-0.5">
-            <button
-              onClick={() => { setIsOpen(true); setCreating("file"); }}
-              className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-              title="New File"
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div
+              className="group flex items-center w-full hover:bg-sidebar-accent transition-colors"
+              style={{ paddingLeft: `${depth * 12 + 8}px` }}
             >
-              <Plus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => { setIsOpen(true); setCreating("folder"); }}
-              className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-              title="New Folder"
+              <button
+                onClick={() => setIsOpen(!isOpen)}
+                onDoubleClick={() => setRenaming(true)}
+                className="flex items-center gap-1 flex-1 px-2 py-1 text-sm min-w-0"
+              >
+                {isOpen ? (
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                {isOpen ? (
+                  <FolderOpen className="h-4 w-4 shrink-0 text-primary" />
+                ) : (
+                  <Folder className="h-4 w-4 shrink-0 text-primary" />
+                )}
+                <span className="truncate font-mono text-sidebar-foreground">
+                  {node.name}
+                </span>
+              </button>
+
+              <div className="hidden group-hover:flex items-center shrink-0 pr-1 gap-0.5">
+                <button
+                  onClick={() => {
+                    setIsOpen(true);
+                    setCreating("file");
+                  }}
+                  className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title="New File"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => {
+                    setIsOpen(true);
+                    setCreating("folder");
+                  }}
+                  className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title="New Folder"
+                >
+                  <FolderPlus className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setRenaming(true)}
+                  className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+                  title="Rename"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={handleDelete}
+                  className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+                  title="Delete"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          </ContextMenuTrigger>
+
+          <ContextMenuContent>
+            <ContextMenuItem
+              onClick={() => {
+                setIsOpen(true);
+                setCreating("file");
+              }}
             >
-              <FolderPlus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => setRenaming(true)}
-              className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-              title="Rename"
+              New File
+            </ContextMenuItem>
+            <ContextMenuItem
+              onClick={() => {
+                setIsOpen(true);
+                setCreating("folder");
+              }}
             >
-              <Pencil className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => onDeleteNode(currentPath)}
-              className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
-              title="Delete"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
+              New Folder
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => setRenaming(true)}>
+              Rename
+            </ContextMenuItem>
+            <ContextMenuItem onClick={handleDelete}>Delete</ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+
         {isOpen && (
           <div>
             {creating && (
@@ -151,6 +223,7 @@ function FileTreeItem({
                 onCancel={() => setCreating(null)}
               />
             )}
+
             {node.children?.map((child) => (
               <FileTreeItem
                 key={child.name}
@@ -178,42 +251,68 @@ function FileTreeItem({
   };
 
   return (
-    <div
-      className={`group flex items-center w-full transition-colors ${
-        isActive ? "bg-editor-selection text-foreground" : "hover:bg-sidebar-accent text-sidebar-foreground"
-      }`}
-      style={{ paddingLeft: `${depth * 12 + 20}px` }}
-    >
-      <button
-        onClick={() => onFileSelect(currentPath, node)}
-        onDoubleClick={() => setRenaming(true)}
-        className="flex items-center gap-1.5 flex-1 px-2 py-1 text-sm min-w-0"
-      >
-        <FileText className={`h-3.5 w-3.5 shrink-0 ${getFileColor(node.name)}`} />
-        <span className="truncate font-mono">{node.name}</span>
-      </button>
-      <div className="hidden group-hover:flex items-center shrink-0 pr-1 gap-0.5">
-        <button
-          onClick={() => setRenaming(true)}
-          className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
-          title="Rename"
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <div
+          className={`group flex items-center w-full transition-colors ${
+            isActive
+              ? "bg-editor-selection text-foreground"
+              : "hover:bg-sidebar-accent text-sidebar-foreground"
+          }`}
+          style={{ paddingLeft: `${depth * 12 + 20}px` }}
         >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
-        <button
-          onClick={() => onDeleteNode(currentPath)}
-          className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
-          title="Delete"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
-      </div>
-    </div>
+          <button
+            onClick={() => onFileSelect(currentPath, node)}
+            onDoubleClick={() => setRenaming(true)}
+            className="flex items-center gap-1.5 flex-1 px-2 py-1 text-sm min-w-0"
+          >
+            <FileText
+              className={`h-3.5 w-3.5 shrink-0 ${getFileColor(node.name)}`}
+            />
+            <span className="truncate font-mono">{node.name}</span>
+          </button>
+
+          <div className="hidden group-hover:flex items-center shrink-0 pr-1 gap-0.5">
+            <button
+              onClick={() => setRenaming(true)}
+              className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground"
+              title="Rename"
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={handleDelete}
+              className="p-0.5 rounded hover:bg-destructive/20 text-muted-foreground hover:text-destructive"
+              title="Delete"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </ContextMenuTrigger>
+
+      <ContextMenuContent>
+        <ContextMenuItem onClick={() => setRenaming(true)}>
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onClick={handleDelete}>Delete</ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
-export function FileExplorer({ files, onFileSelect, activeFilePath, onCreateFile, onCreateFolder, onDeleteNode, onRenameNode }: FileExplorerProps) {
-  const [creatingRoot, setCreatingRoot] = useState<"file" | "folder" | null>(null);
+export function FileExplorer({
+  files,
+  onFileSelect,
+  activeFilePath,
+  onCreateFile,
+  onCreateFolder,
+  onDeleteNode,
+  onRenameNode,
+}: FileExplorerProps) {
+  const [creatingRoot, setCreatingRoot] = useState<"file" | "folder" | null>(
+    null
+  );
 
   return (
     <div className="h-full bg-sidebar flex flex-col">
@@ -236,6 +335,7 @@ export function FileExplorer({ files, onFileSelect, activeFilePath, onCreateFile
           </button>
         </div>
       </div>
+
       <div className="flex-1 overflow-y-auto py-1">
         {creatingRoot && (
           <InlineInput
@@ -249,6 +349,7 @@ export function FileExplorer({ files, onFileSelect, activeFilePath, onCreateFile
             onCancel={() => setCreatingRoot(null)}
           />
         )}
+
         {files.map((node) => (
           <FileTreeItem
             key={node.name}
