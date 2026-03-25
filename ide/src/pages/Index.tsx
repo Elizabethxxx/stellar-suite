@@ -5,7 +5,11 @@ import CodeEditor from "@/components/editor/CodeEditor";
 import { Terminal } from "@/components/ide/Terminal";
 import { Toolbar } from "@/components/ide/Toolbar";
 import { ContractPanel } from "@/components/ide/ContractPanel";
+import { IdentitiesView } from "@/components/ide/IdentitiesView";
 import { StatusBar } from "@/components/ide/StatusBar";
+import { useIdentityStore } from "@/store/useIdentityStore";
+import { sampleContracts, FileNode } from "@/lib/sample-contracts";
+import { DROP_LIMIT_BYTES, mapDroppedEntriesToTree, mergeFileNodes, readDropPayload } from "@/lib/file-drop";
 import { FileNode } from "@/lib/sample-contracts";
 import { useFileStore } from "@/store/useFileStore";
 import { useDiagnosticsStore } from "@/store/useDiagnosticsStore";
@@ -13,7 +17,7 @@ import { parseMixedOutput } from "@/utils/cargoParser";
 import { createStreamProcessor, readCompileResponse } from "@/utils/compileStream";
 import {
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
-  FolderTree, Rocket, X, FileText, Terminal as TerminalIcon,
+  FolderTree, Rocket, X, FileText, Terminal as TerminalIcon, Users,
 } from "lucide-react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
@@ -85,6 +89,7 @@ const Index = () => {
   }, [loadIdentities]);
 
 const Index = () => {
+  const { loadIdentities, activeContext, activeIdentity } = useIdentityStore();
   const [files, setFiles] = useState<FileNode[]>(() => cloneFiles(sampleContracts));
   const [openTabs, setOpenTabs] = useState<TabInfo[]>([
     { path: ["hello_world", "lib.rs"], name: "lib.rs" },
@@ -99,6 +104,7 @@ const Index = () => {
   const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
   const [unsavedFiles, setUnsavedFiles] = useState<Set<string>>(new Set());
   const [saveStatus, setSaveStatus] = useState("");
+  const [leftSidebarTab, setLeftSidebarTab] = useState<"explorer" | "identities">("explorer");
   const [mobilePanel, setMobilePanel] = useState<"none" | "explorer" | "interact">("none");
    const [isExplorerDragActive, setIsExplorerDragActive] = useState(false);
   const dragDepthRef = useRef(0);
@@ -121,6 +127,11 @@ const Index = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    loadIdentities();
+  }, [loadIdentities]);
+
+  // Desktop defaults — show panels on wide screens
   useEffect(() => {
     const mq = window.matchMedia("(min-width: 768px)");
     if (mq.matches) {
@@ -334,18 +345,25 @@ const Index = () => {
     }, 1200);
   }, [appendTerminalOutput]);
 
-  const { activeIdentity } = useIdentityStore();
-
   const handleInvoke = useCallback(
     (fn: string, args: string) => {
       setTerminalExpanded(true);
-      appendTerminalOutput(`Invoking ${fn}(${args})...\r\n`);
-      setTimeout(
-        () => appendTerminalOutput('Result: ["Hello", "Dev"]\r\n'),
-        800
-      );
-    },
-    [appendTerminalOutput]
+      
+      const signer =
+      activeContext?.type === "web-wallet"
+        ? "browser-wallet"
+        : activeIdentity?.nickname ?? "anonymous";
+  
+      //   Structured log
+      addLog("info", `Invoking ${fn}(${args}) as ${signer}...`);
+
+      // Terminal output
+      appendTerminalOutput(`Invoking ${fn}(${args}) as ${signer}...\r\n`);
+
+      setTimeout(() => {
+        addLog("success", `✓ Result: ["Hello", "Dev"]`);
+        appendTerminalOutput('Result: ["Hello", "Dev"]\r\n');
+      }, 800);
   );
 
   useEffect(() => {
@@ -419,8 +437,29 @@ const Index = () => {
             onClick={() => setShowExplorer(!showExplorer)}
             className="p-2 text-muted-foreground transition-colors hover:text-foreground"
             title="Toggle Explorer"
+>
           >
             {showExplorer ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+          </button>
+          <button
+            onClick={() => {
+              setLeftSidebarTab("explorer");
+              setShowExplorer(true);
+            }}
+            className={`p-2 transition-colors ${leftSidebarTab === "explorer" ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            title="Explorer"
+          >
+            <FolderTree className="h-4 w-4" />
+          </button>
+          <button
+            onClick={() => {
+              setLeftSidebarTab("identities");
+              setShowExplorer(true);
+            }}
+            className={`p-2 transition-colors ${leftSidebarTab === "identities" ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
+            title="Identities"
+          >
+            <Users className="h-4 w-4" />
           </button>
         </div>
 
@@ -488,7 +527,8 @@ const Index = () => {
               <>
                 <ResizablePanel id="explorer" order={1} defaultSize={20} minSize={10} maxSize={40} className="hidden md:block">
                   <div className="h-full w-full overflow-hidden border-r border-border bg-sidebar">
-                     <FileExplorer
+                    {leftSidebarTab === "explorer" ? (
+                      <FileExplorer
                 files={files}
                 onFileSelect={(path, file) => { handleFileSelect(path, file); }}
                 activeFilePath={activeTabPath}
@@ -502,6 +542,9 @@ const Index = () => {
                 onDragLeave={handleExplorerDragLeave}
                 onDrop={handleExplorerDrop}
               />
+                    ) : (
+                      <IdentitiesView network={network} />
+                    )}
                   </div>
                 </ResizablePanel>
                 <ResizableHandle withHandle className="hidden md:flex" />
