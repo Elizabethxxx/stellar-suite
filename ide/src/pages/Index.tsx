@@ -87,7 +87,7 @@ const Index = () => {
   const [saveStatus, setSaveStatus] = useState("");
   const [mobilePanel, setMobilePanel] = useState<"none" | "explorer" | "interact" | "deployments" | "identities">("none");
   const [isExplorerDragActive, setIsExplorerDragActive] = useState(false);
-  const [leftSidebarTab, setLeftSidebarTab] = useState<"explorer" | "deployments" | "identities">("explorer");
+  const [leftSidebarTab, setLeftSidebarTab] = useState<"explorer" | "deployments" | "identities" | "search">("explorer");
   const dragDepthRef = useRef(0);
 
   const {
@@ -96,7 +96,6 @@ const Index = () => {
     openTabs,
     activeTabPath,
     unsavedFiles,
-    setFiles,
     setActiveTabPath,
     addTab,
     closeTab,
@@ -117,19 +116,7 @@ const Index = () => {
   const { addContract } = useDeployedContractsStore();
   const { setDiagnostics, clearDiagnostics } = useDiagnosticsStore();
 
-  const [terminalExpanded, setTerminalExpanded] = useState(true);
-  const [terminalOutput, setTerminalOutput] = useState("");
-  const [isCompiling, setIsCompiling] = useState(false);
   const [buildState, setBuildState] = useState<BuildState>("idle");
-  const [contractId, setContractId] = useState<string | null>(null);
-  const [showExplorer, setShowExplorer] = useState(false);
-  const [showPanel, setShowPanel] = useState(false);
-  const [cursorPos, setCursorPos] = useState({ line: 1, col: 1 });
-  const [saveStatus, setSaveStatus] = useState("");
-  const [leftSidebarTab, setLeftSidebarTab] = useState<"explorer" | "identities" | "search">("explorer");
-  const [mobilePanel, setMobilePanel] = useState<"none" | "explorer" | "interact">("none");
-  const [isExplorerDragActive, setIsExplorerDragActive] = useState(false);
-  const dragDepthRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -241,13 +228,13 @@ const Index = () => {
     } catch (error) {
       const message = error instanceof Error ? error.message : "Build failed";
       appendTerminalOutput(`Build failed: ${message}\r\n`);
-      showCompilationFailedToast(message);
+      showCompilationFailedToast({ onViewLogs: () => setTerminalExpanded(true) });
       setBuildState("error");
     } finally {
       setIsCompiling(false);
       setTimeout(() => setBuildState("idle"), 1200);
     }
-  }, [activeTabPath, appendTerminalOutput, clearDiagnostics, files, network, setDiagnostics]);
+  }, [activeTabPath, appendTerminalOutput, files, network, setDiagnostics]);
 
   const handleDeploy = useCallback(() => {
     setTerminalExpanded(true);
@@ -284,15 +271,6 @@ const Index = () => {
     [activeContext, activeIdentity, appendTerminalOutput]
   );
 
-  const getActiveContent = (): { content: string; language: string; fileId: string } => {
-    const file = findNode(files, activeTabPath);
-    return {
-      content: file?.content ?? "// Select a file to begin editing",
-      language: file?.language ?? "rust",
-      fileId: activeTabPath.join("/"),
-    };
-  };
-
   const handleCreateFile = useCallback(
     (parent: string[], name: string) => {
       createFile(parent, name);
@@ -328,12 +306,6 @@ const Index = () => {
     setIsExplorerDragActive(true);
   }, []);
 
-  const handleExplorerDragEnter = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    dragDepthRef.current += 1;
-  }, []);
-
   const handleExplorerDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
@@ -357,29 +329,6 @@ const Index = () => {
       dragDepthRef.current = 0;
       setIsExplorerDragActive(false);
 
-    try {
-      const dropped = await readDropPayload(event.dataTransfer);
-      const { nodes, uploadedFiles } = await mapDroppedEntriesToTree(dropped);
-
-      if (uploadedFiles === 0) return;
-
-      setFiles(mergeFileNodes(files, nodes));
-      appendTerminalOutput(`Uploaded ${uploadedFiles} file(s).\r\n`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown error";
-      appendTerminalOutput(`Upload failed: ${message}\r\n`);
-    }
-  }, [files, setFiles, appendTerminalOutput]);
-
-  const getActiveContent = (): { content: string; language: string } => {
-    const file = findNode(files, activeTabPath);
-    return {
-      content: file?.content || "// Select a file to begin editing",
-      language: file?.language || "rust",
-    };
-  };
-
-  const { content, language } = getActiveContent();
       try {
         const dropped = await readDropPayload(event.dataTransfer);
         const { nodes, uploadedFiles, skippedFiles, totalBytes } = await mapDroppedEntriesToTree(dropped);
@@ -391,7 +340,7 @@ const Index = () => {
           return;
         }
 
-        setFiles((prev) => mergeFileNodes(prev, nodes));
+        setFiles(mergeFileNodes(files, nodes));
         appendTerminalOutput(
           `Uploaded ${uploadedFiles} file${uploadedFiles === 1 ? "" : "s"} (${(totalBytes / 1024).toFixed(1)} KB).\r\n`
         );
@@ -405,8 +354,17 @@ const Index = () => {
         appendTerminalOutput(`Upload failed: ${message}\r\n`);
       }
     },
-    [appendTerminalOutput, setFiles]
+    [appendTerminalOutput, files, setFiles]
   );
+
+  const getActiveContent = useCallback((): { content: string; language: string; fileId: string } => {
+    const file = findNode(files, activeTabPath);
+    return {
+      content: file?.content ?? "// Select a file to begin editing",
+      language: file?.language ?? "rust",
+      fileId: activeTabPath.join("/"),
+    };
+  }, [activeTabPath, files]);
 
   // Global search opening via shortcut
   useEffect(() => {
@@ -444,6 +402,7 @@ const Index = () => {
       />
 
       <div className="flex-1 flex overflow-hidden relative">
+        {/* Desktop Sidebar (Left) */}
         <div className="hidden md:flex flex-col bg-sidebar border-r border-border shrink-0 z-10 w-12 items-center py-4 gap-4">
           <button
             onClick={() => {
@@ -460,11 +419,6 @@ const Index = () => {
                 : "text-muted-foreground hover:text-foreground hover:bg-muted"
             }`}
             title="File Explorer"
-            
-          <button
-            onClick={() => setShowExplorer((prev) => !prev)}
-            className="p-2 text-muted-foreground transition-colors hover:text-foreground"
-            title="Toggle Explorer"
           >
             <FolderTree className="h-5 w-5" />
           </button>
@@ -503,28 +457,28 @@ const Index = () => {
                 : "text-muted-foreground hover:text-foreground hover:bg-muted"
             }`}
             title="Recent Deployments"
-              setLeftSidebarTab("search");
-              setShowExplorer(true);
-              setTimeout(() => searchInputRef.current?.focus(), 0);
+          >
+            <History className="h-5 w-5" />
+          </button>
+
+          <button
+            onClick={() => {
+              if (leftSidebarTab === "search" && showExplorer) {
+                setShowExplorer(false);
+              } else {
+                setLeftSidebarTab("search");
+                setShowExplorer(true);
+                setTimeout(() => searchInputRef.current?.focus(), 0);
+              }
             }}
-            className={`p-2 transition-colors ${
-              leftSidebarTab === "search" ? "text-primary" : "text-muted-foreground hover:text-foreground"
+            className={`p-2 rounded-md transition-all ${
+              showExplorer && leftSidebarTab === "search" 
+                ? "bg-primary/20 text-primary shadow-sm" 
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
             }`}
             title="Search"
           >
-            <Search className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => {
-              setLeftSidebarTab("identities");
-              setShowExplorer(true);
-            }}
-            className={`p-2 transition-colors ${
-              leftSidebarTab === "identities" ? "text-primary" : "text-muted-foreground hover:text-foreground"
-            }`}
-            title="Identities"
-          >
-            <History className="h-5 w-5" />
+            <Search className="h-5 w-5" />
           </button>
 
           <div className="mt-auto border-t border-border w-full pt-4 flex flex-col items-center">
@@ -538,21 +492,13 @@ const Index = () => {
           </div>
         </div>
 
+        {/* Mobile Panels */}
         {mobilePanel === "explorer" && (
           <div className="md:hidden absolute inset-0 z-30 flex">
-            <div className="w-64 bg-sidebar border-r border-border h-full">
+            <div className="w-64 bg-sidebar border-r border-border h-full flex flex-col">
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                 <span className="text-xs font-semibold text-muted-foreground uppercase">Explorer</span>
                 <button title="Close Explorer" onClick={() => setMobilePanel("none")} className="text-muted-foreground hover:text-foreground">
-          <div className="absolute inset-0 z-30 flex md:hidden">
-            <div className="h-full w-64 border-r border-border bg-sidebar">
-              <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                <span className="text-xs font-semibold uppercase text-muted-foreground">Explorer</span>
-                <button
-                  title="Close Explorer"
-                  onClick={() => setMobilePanel("none")}
-                  className="text-muted-foreground hover:text-foreground"
-                >
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -560,10 +506,10 @@ const Index = () => {
                 files={files}
                 onFileSelect={handleFileSelect}
                 activeFilePath={activeTabPath}
-                onCreateFile={(path, name) => createFile(path, name)}
-                onCreateFolder={(path, name) => createFolder(path, name)}
-                onDeleteNode={(path) => deleteNode(path)}
-                onRenameNode={(path, name) => renameNode(path, name)}
+                onCreateFile={createFile}
+                onCreateFolder={createFolder}
+                onDeleteNode={deleteNode}
+                onRenameNode={renameNode}
                 isDragActive={isExplorerDragActive}
                 onDragEnter={handleExplorerDragEnter}
                 onDragOver={handleExplorerDragOver}
@@ -574,20 +520,22 @@ const Index = () => {
             <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
           </div>
         )}
+
         {mobilePanel === "identities" && (
           <div className="md:hidden absolute inset-0 z-30 flex">
             <div className="w-64 bg-sidebar border-r border-border h-full flex flex-col">
-               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
+              <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                 <span className="text-xs font-semibold text-muted-foreground uppercase">Users</span>
                 <button title="Close" onClick={() => setMobilePanel("none")} className="text-muted-foreground hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </div>
-               <IdentitiesView network={network} />
+              <IdentitiesView network={network} />
             </div>
             <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
           </div>
         )}
+
         {mobilePanel === "deployments" && (
           <div className="md:hidden absolute inset-0 z-30 flex">
             <div className="w-64 bg-sidebar border-r border-border h-full flex flex-col">
@@ -597,38 +545,27 @@ const Index = () => {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-               <DeploymentsView 
-                  activeContractId={contractId}
-                  onSelectContract={(id, net) => {
-                    setContractId(id);
-                    setNetwork(net as NetworkKey);
-                    setMobilePanel("none");
-                    appendTerminalOutput(`Targeting contract ${id.substring(0,8)}... on ${net}\r\n`);
-                  }}
-                />
+              <DeploymentsView 
+                activeContractId={contractId}
+                onSelectContract={(id, net) => {
+                  setContractId(id);
+                  setNetwork(net as NetworkKey);
+                  setMobilePanel("none");
+                  appendTerminalOutput(`Targeting contract ${id.substring(0,8)}... on ${net}\r\n`);
+                }}
+              />
             </div>
             <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
           </div>
         )}
+
         {mobilePanel === "interact" && (
           <div className="md:hidden absolute inset-0 z-30 flex justify-end">
             <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
-            <div className="w-72 bg-card border-l border-border h-full">
+            <div className="w-72 bg-card border-l border-border h-full flex flex-col">
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
                 <span className="text-xs font-semibold text-muted-foreground uppercase">Interact</span>
                 <button title="Close Interact" onClick={() => setMobilePanel("none")} className="text-muted-foreground hover:text-foreground">
-
-        {mobilePanel === "interact" && (
-          <div className="absolute inset-0 z-30 flex justify-end md:hidden">
-            <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
-            <div className="h-full w-72 border-l border-border bg-card">
-              <div className="flex items-center justify-between border-b border-border px-3 py-2">
-                <span className="text-xs font-semibold uppercase text-muted-foreground">Interact</span>
-                <button
-                  title="Close Interact"
-                  onClick={() => setMobilePanel("none")}
-                  className="text-muted-foreground hover:text-foreground"
-                >
                   <X className="h-4 w-4" />
                 </button>
               </div>
@@ -637,6 +574,7 @@ const Index = () => {
           </div>
         )}
 
+        {/* Desktop Main Content */}
         <div className="flex-1 flex overflow-hidden">
           <ResizablePanelGroup direction="horizontal" autoSaveId="ide-main-layout">
             {showExplorer && (
@@ -659,10 +597,6 @@ const Index = () => {
                         onCreateFolder={createFolder}
                         onDeleteNode={deleteNode}
                         onRenameNode={renameNode}
-                        onCreateFile={handleCreateFile}
-                        onCreateFolder={handleCreateFolder}
-                        onDeleteNode={handleDeleteNode}
-                        onRenameNode={handleRenameNode}
                         isDragActive={isExplorerDragActive}
                         onDragEnter={handleExplorerDragEnter}
                         onDragOver={handleExplorerDragOver}
@@ -671,7 +605,7 @@ const Index = () => {
                       />
                     )}
                     {leftSidebarTab === "identities" && (
-                        <IdentitiesView network={network} />
+                      <IdentitiesView network={network} />
                     )}
                     {leftSidebarTab === "deployments" && (
                       <DeploymentsView 
@@ -701,7 +635,6 @@ const Index = () => {
                         }}
                       />
                     )}
-                    {leftSidebarTab === "identities" && <IdentitiesView network={network} />}
                   </div>
                 </ResizablePanel>
                 <ResizableHandle withHandle className="hidden md:flex" />
@@ -711,9 +644,6 @@ const Index = () => {
             <ResizablePanel id="main-content" order={2} minSize={30} className="flex flex-col min-w-0">
               <ResizablePanelGroup direction="vertical" autoSaveId="ide-editor-terminal">
                 <ResizablePanel id="editor" order={1} defaultSize={75} minSize={30} className="flex flex-col min-w-0">
-            <ResizablePanel id="main-content" order={2} minSize={30} className="flex min-w-0 flex-col">
-              <ResizablePanelGroup direction="vertical" autoSaveId="ide-editor-terminal">
-                <ResizablePanel id="editor" order={1} defaultSize={75} minSize={30} className="flex min-w-0 flex-col">
                   <EditorTabs
                     tabs={tabsWithStatus}
                     activeTab={activeTabPath.join("/")}
@@ -745,12 +675,11 @@ const Index = () => {
                     </ResizablePanel>
                   </>
                 ) : (
-                  <div className="shrink-0 flex flex-col min-w-0">
-                  <div className="flex min-w-0 flex-col">
+                  <div className="shrink-0">
                     <Terminal
                       output={terminalOutput}
-                      isExpanded={terminalExpanded}
-                      onToggle={() => setTerminalExpanded((prev) => !prev)}
+                      isExpanded={false}
+                      onToggle={() => setTerminalExpanded(true)}
                       onClear={() => setTerminalOutput("")}
                     />
                   </div>
@@ -760,6 +689,7 @@ const Index = () => {
           </ResizablePanelGroup>
         </div>
 
+        {/* Desktop Right Sidebar */}
         <div className="hidden md:flex shrink-0 z-10">
           {showPanel && (
             <div className="w-64 border-l border-border bg-card">
@@ -770,8 +700,6 @@ const Index = () => {
             <button
               onClick={() => setShowPanel(!showPanel)}
               className="p-2 text-muted-foreground hover:text-foreground transition-colors"
-              onClick={() => setShowPanel((prev) => !prev)}
-              className="p-2 text-muted-foreground transition-colors hover:text-foreground"
               title="Toggle Panel"
             >
               {showPanel ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
@@ -780,6 +708,7 @@ const Index = () => {
         </div>
       </div>
 
+      {/* Desktop Footer */}
       <div className="hidden md:block">
         <StatusBar
           language={language}
@@ -794,6 +723,7 @@ const Index = () => {
         />
       </div>
 
+      {/* Mobile Footer Navigation */}
       <div className="md:hidden flex flex-col border-t border-border bg-sidebar">
         <div className="flex items-center justify-between px-3 py-1 border-b border-border/50 bg-muted/30">
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
@@ -801,26 +731,11 @@ const Index = () => {
             <span>Ln {cursorPos.line}, Col {cursorPos.col}</span>
           </div>
           <span className="text-[10px] text-muted-foreground font-mono">{network}</span>
-      <div className="flex flex-col border-t border-border bg-sidebar md:hidden">
-        <div className="flex items-center justify-between border-b border-border/50 bg-muted/30 px-3 py-1">
-          <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
-            {unsavedFiles.size > 0 && <span className="text-warning">{unsavedFiles.size} unsaved</span>}
-            <span>
-              Ln {cursorPos.line}, Col {cursorPos.col}
-            </span>
-          </div>
-          <span className="font-mono text-[10px] text-muted-foreground">{network}</span>
         </div>
         <div className="flex items-stretch">
           <button
             onClick={() => setMobilePanel(mobilePanel === "explorer" ? "none" : "explorer")}
             className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors border-t-2 ${mobilePanel === "explorer" ? "border-primary text-primary bg-primary/5" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setMobilePanel((prev) => (prev === "explorer" ? "none" : "explorer"))}
-            className={`flex-1 flex flex-col items-center gap-0.5 border-t-2 py-2.5 text-[10px] font-medium transition-colors ${
-              mobilePanel === "explorer"
-                ? "border-primary bg-primary/5 text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
           >
             <FolderTree className="h-4 w-4" />
             Explorer
@@ -849,12 +764,6 @@ const Index = () => {
           <button
             onClick={() => setMobilePanel(mobilePanel === "interact" ? "none" : "interact")}
             className={`flex-1 flex flex-col items-center gap-0.5 py-2.5 text-[10px] font-medium transition-colors border-t-2 ${mobilePanel === "interact" ? "border-primary text-primary bg-primary/5" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-            onClick={() => setMobilePanel((prev) => (prev === "interact" ? "none" : "interact"))}
-            className={`flex-1 flex flex-col items-center gap-0.5 border-t-2 py-2.5 text-[10px] font-medium transition-colors ${
-              mobilePanel === "interact"
-                ? "border-primary bg-primary/5 text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
           >
             <Rocket className="h-4 w-4" />
             Interact

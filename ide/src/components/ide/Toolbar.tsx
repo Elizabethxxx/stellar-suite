@@ -150,14 +150,12 @@ export function Toolbar({
           </Button>
           <Button
             type="button"
-            variant="secondary"
-            className="flex-1 gap-1"
+            variant="outline"
+            className="flex-1 gap-1 text-[11px] h-9"
             onClick={() => {
               onTest();
               setMobileMenuOpen(false);
             }}
-            variant="outline"
-            className="flex-1 gap-1 text-[11px] h-9"
           >
             Test
           </Button>

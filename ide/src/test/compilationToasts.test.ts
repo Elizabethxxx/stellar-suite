@@ -37,7 +37,13 @@ describe("compilation toast helpers", () => {
 
     const [title, opts] = (toast.error as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [
       string,
-      any,
+      {
+        duration: number;
+        action: {
+          label: string;
+          onClick: (event: { preventDefault: () => void }) => void;
+        };
+      },
     ];
 
     expect(title).toBe(COMPILATION_FAILED_TITLE);
