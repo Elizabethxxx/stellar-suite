@@ -1,4 +1,4 @@
-import { Network, Settings, TestTube, Upload, Menu, X } from "lucide-react";
+import { Menu, Network, Settings, TestTube, Upload, X } from "lucide-react";
 import { useState } from "react";
 
 import { BuildButton } from "@/components/ide/BuildButton";
@@ -31,45 +31,45 @@ export function Toolbar({
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <div className="bg-toolbar-bg border-b border-border">
-      <div className="hidden md:flex items-center justify-between px-3 py-1.5">
+    <div className="border-b border-border bg-toolbar-bg">
+      <div className="hidden items-center justify-between px-3 py-1.5 md:flex">
         <div className="flex items-center gap-2">
-          <span className="mr-2 text-sm font-semibold font-mono text-primary">
+          <span className="mr-2 font-mono text-sm font-semibold text-primary">
             Kit CANVAS
           </span>
           <BuildButton
             onClick={onCompile}
-            disabled={isCompiling}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
-            
-            <Play className="h-3.5 w-3.5" />
-            {isCompiling ? "Building..." : "Build"}
-          </button>
-          <button
-            onClick={onDeploy}
+            isBuilding={isCompiling}
+            state={isCompiling ? "building" : buildState}
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
             className="gap-1.5 text-xs"
+            onClick={onDeploy}
           >
             <Upload className="h-3.5 w-3.5" />
             Deploy
           </Button>
           <Button
             type="button"
-            variant="secondary"
             size="sm"
-            onClick={onTest}
+            variant="secondary"
             className="gap-1.5 text-xs"
+            onClick={onTest}
           >
             <TestTube className="h-3.5 w-3.5" />
             Test
           </Button>
           {saveStatus && (
-            <span className="ml-2 animate-in fade-in font-mono text-[10px] text-muted-foreground">
+            <span className="ml-2 font-mono text-[10px] text-muted-foreground">
               {saveStatus}
             </span>
           )}
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Network className="h-3.5 w-3.5" />
             <select
               value={network}
@@ -81,8 +81,8 @@ export function Toolbar({
               <option value="mainnet">Mainnet</option>
               <option value="local">Local</option>
             </select>
-          </div>
-          <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+          </label>
+          <button className="rounded p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground" title="Settings">
             <Settings className="h-4 w-4" />
           </button>
         </div>
@@ -90,7 +90,7 @@ export function Toolbar({
 
       <div className="flex items-center justify-between px-2 py-1.5 md:hidden">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold font-mono text-primary">
+          <span className="font-mono text-xs font-semibold text-primary">
             Kit CANVAS
           </span>
           <BuildButton
@@ -102,9 +102,7 @@ export function Toolbar({
         </div>
         <div className="flex items-center gap-1">
           {saveStatus && (
-            <span className="font-mono text-[9px] text-muted-foreground">
-              {saveStatus}
-            </span>
+            <span className="font-mono text-[9px] text-muted-foreground">{saveStatus}</span>
           )}
           <select
             value={network}
@@ -117,50 +115,52 @@ export function Toolbar({
             <option value="local">Local</option>
           </select>
           <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
             className="p-1.5 text-muted-foreground hover:text-foreground"
+            aria-label="Toggle menu"
           >
-            {mobileMenuOpen ? (
-              <X className="h-4 w-4" />
-            ) : (
-              <Menu className="h-4 w-4" />
-            )}
+            {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
           </button>
         </div>
       </div>
 
-      {/* Mobile dropdown */}
-      {mobileMenuOpen &&
-      <div className="md:hidden flex gap-1 px-2 pb-2 border-b border-border">
-          <button
-          onClick={() => {onCompile();setMobileMenuOpen(false);}}
-          disabled={isCompiling}
-          className="flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium rounded bg-primary text-primary-foreground disabled:opacity-50">
-          
-            <Play className="h-3 w-3" />
-            {isCompiling ? "..." : "Build"}
-          </button>
-          <button
-          onClick={() => {onDeploy();setMobileMenuOpen(false);}}
-          className="flex-1 flex items-center justify-center gap-1 px-2 py-2 text-[11px] font-medium rounded bg-secondary text-secondary-foreground">
-          
-            <Upload className="h-3 w-3" />
+      {mobileMenuOpen && (
+        <div className="flex gap-1 border-b border-border px-2 pb-2 md:hidden">
+          <Button
+            type="button"
+            className="flex-1 gap-1"
+            onClick={() => {
+              onCompile();
+              setMobileMenuOpen(false);
+            }}
+            disabled={isCompiling}
+          >
+            Build
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            className="flex-1 gap-1"
+            onClick={() => {
+              onDeploy();
+              setMobileMenuOpen(false);
+            }}
+          >
             Deploy
           </Button>
           <Button
             type="button"
+            variant="secondary"
+            className="flex-1 gap-1"
             onClick={() => {
               onTest();
               setMobileMenuOpen(false);
             }}
-            variant="secondary"
-            className="h-9 flex-1 gap-1 px-2 text-[11px]"
           >
-            <TestTube className="h-3 w-3" />
             Test
           </Button>
         </div>
-      }
-    </div>);
-
+      )}
+    </div>
+  );
 }

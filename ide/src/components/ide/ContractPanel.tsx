@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Rocket, Copy, ExternalLink, UserPlus, ShieldAlert, Key, Trash2, Braces } from "lucide-react";
+import { Rocket, Copy, ExternalLink, UserPlus, ShieldAlert, Key, Trash2, Braces, Download } from "lucide-react";
 import { useIdentityStore } from "@/store/useIdentityStore";
 import { useFileStore } from "@/store/useFileStore";
 import { resolveContractSchema } from "@/lib/contractAbiParser";
+import { createBindingsExportFromWorkspace, downloadBindingsFile } from "@/lib/bindingsGenerator";
 import {
   Select,
   SelectContent,
@@ -70,6 +71,17 @@ export function ContractPanel({ contractId, onInvoke }: ContractPanelProps) {
       toast.error(message);
     } finally {
       setIsResolvingAbi(false);
+    }
+  };
+  
+  const handleExportBindings = () => {
+    try {
+      const result = createBindingsExportFromWorkspace(files, activeTabPath);
+      downloadBindingsFile(result);
+      toast.success(`Exported ${result.filename} using ${result.mode} generation`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unable to export JS bindings";
+      toast.error(message);
     }
   };
 
@@ -295,6 +307,14 @@ export function ContractPanel({ contractId, onInvoke }: ContractPanelProps) {
                   </pre>
                 </div>
               )}
+                
+              <button
+                onClick={handleExportBindings}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium rounded border border-border bg-muted text-foreground hover:bg-muted/80 transition-colors"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export JS Bindings
+              </button>
               <p className="text-[10px] md:text-xs text-muted-foreground font-semibold uppercase tracking-wider">Resources</p>
               <a href="https://soroban.stellar.org/docs" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-[10px] md:text-xs text-primary hover:underline">
                 <ExternalLink className="h-3 w-3" />

@@ -27,3 +27,5 @@ extension/templates/*/target/
 extension/templates/*/.soroban/
 extension/templates/*/Cargo.lock
 extension/templates/**/*.wasm
+
+docs
