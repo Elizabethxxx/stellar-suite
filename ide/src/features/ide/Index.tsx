@@ -6,7 +6,7 @@ import { EditorTabs } from "@/components/ide/EditorTabs";
 import CodeEditor from "@/components/ide/CodeEditor";
 import { Terminal } from "@/components/ide/Terminal";
 import { Toolbar } from "@/components/ide/Toolbar";
-import { ContractPanel } from "@/components/ide/ContractPanel";
+import { AssistantSidebar } from "@/components/ide/AssistantSidebar";
 import { IdentitiesView } from "@/components/ide/IdentitiesView";
 import { StatusBar } from "@/components/ide/StatusBar";
 import { SearchPane } from "@/components/ide/SearchPane";
@@ -384,6 +384,13 @@ const Index = () => {
   }, []);
 
   const { content, language, fileId } = getActiveContent();
+  const activeFileContext = activeTabPath.length
+    ? {
+        path: activeTabPath.join("/"),
+        language,
+        content,
+      }
+    : null;
 
   const tabsWithStatus = openTabs.map((t) => ({
     ...t,
@@ -566,12 +573,16 @@ const Index = () => {
             <div className="flex-1 bg-background/60" onClick={() => setMobilePanel("none")} />
             <div className="w-72 bg-card border-l border-border h-full flex flex-col">
               <div className="flex items-center justify-between px-3 py-2 border-b border-border">
-                <span className="text-xs font-semibold text-muted-foreground uppercase">Interact</span>
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Assistant</span>
                 <button title="Close Interact" onClick={() => setMobilePanel("none")} className="text-muted-foreground hover:text-foreground">
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              <ContractPanel contractId={contractId} onInvoke={handleInvoke} />
+              <AssistantSidebar
+                activeFile={activeFileContext}
+                contractId={contractId}
+                onInvoke={handleInvoke}
+              />
             </div>
           </div>
         )}
@@ -694,8 +705,12 @@ const Index = () => {
         {/* Desktop Right Sidebar */}
         <div className="hidden md:flex shrink-0 z-10">
           {showPanel && (
-            <div className="w-64 border-l border-border bg-card">
-              <ContractPanel contractId={contractId} onInvoke={handleInvoke} />
+            <div className="w-[22rem] border-l border-border bg-card">
+              <AssistantSidebar
+                activeFile={activeFileContext}
+                contractId={contractId}
+                onInvoke={handleInvoke}
+              />
             </div>
           )}
           <div className="flex flex-col bg-card border-l border-border h-full">
