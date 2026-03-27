@@ -1,6 +1,7 @@
 import { useWorkspaceStore } from "@/store/workspaceStore";
 import { FileText, GitBranch, AlertCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { CommitForm } from "@/components/vcs/CommitForm";
 
 export function GitPane() {
   const { unsavedFiles, setDiffViewPath, setShowExplorer } = useWorkspaceStore();
@@ -52,13 +53,15 @@ export function GitPane() {
       </ScrollArea>
 
       {modifiedFiles.length > 0 && (
-        <div className="p-3 border-t border-sidebar-border bg-sidebar/50">
+        <div className="px-3 pb-1">
           <div className="flex items-start gap-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-[10px] text-amber-500">
             <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
             <p>Double-click a file to view diff with HEAD</p>
           </div>
         </div>
       )}
+
+      <CommitForm />
     </div>
   );
 }
