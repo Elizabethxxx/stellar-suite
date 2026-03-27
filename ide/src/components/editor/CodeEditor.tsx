@@ -5,12 +5,18 @@ import { useWorkspaceStore } from "@/store/workspaceStore";
 import { applyEditsToTree, computeRenameEdits, validateRustIdentifier } from "@/utils/renameProvider";
 import { useDiagnosticsStore as _useDiagnosticsStore } from "@/store/useDiagnosticsStore";
 import { useEditorStore } from "@/store/editorStore";
+import {
+  createRustFoldingRangeProvider,
+  RUST_FOLD_REGION_END,
+  RUST_FOLD_REGION_START,
+} from "@/lib/rustFolding";
 import Editor, { OnChange, OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import React, { Suspense, useEffect, useRef } from "react";
 import { analyzeMathSafety } from "../../lib/mathSafetyAnalyzer";
 import { useMathSafetyStore } from "../../store/useMathSafetyStore";
 import { Breadcrumbs } from "./Breadcrumbs";
+import { getAllMonacoCompletions } from "@/utils/proptestSnippets";
 
 interface CodeEditorProps {
   onCursorChange?: (line: number, col: number) => void;
@@ -22,15 +28,20 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
   const { diagnostics } = useDiagnosticsStore();
   const { config, setMathDiagnostics, getAllDiagnostics } = useMathSafetyStore();
   const { getFileCoverage } = useCoverageStore();
-  const { setJumpToLine } = useEditorStore();
+  const { setJumpToLine, saveViewState, getViewState } = useEditorStore();
   const rustProviderRegistered = useRef(false);
   const monacoRef = useRef<typeof Monaco | null>(null);
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const semanticProviderRegistered = useRef(false);
   const coverageDecorations = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
+  const activeFileId = activeTabPath.join("/");
+  const activeFileIdRef = useRef(activeFileId);
   // Keep a live ref to files so the rename provider always sees the latest state
   const filesRef = useRef(files);
   useEffect(() => { filesRef.current = files; }, [files]);
+  useEffect(() => {
+    activeFileIdRef.current = activeFileId;
+  }, [activeFileId]);
 
   const activeFile = React.useMemo(() => {
     const findNode = (
@@ -64,7 +75,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
     const monaco = monacoRef.current;
     if (!monaco) return;
 
-    const virtualId = activeTabPath.join("/");
+    const virtualId = activeFileId;
 
     // Run math safety analysis if enabled
     if (config.enabled && activeFile?.content) {
@@ -106,6 +117,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
   }, [
     diagnostics,
     activeTabPath,
+    activeFileId,
     activeFile,
     config,
     setMathDiagnostics,
@@ -160,6 +172,31 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
     coverageDecorations.current.set(decorations);
   }, [activeTabPath, getFileCoverage]);
 
+  useEffect(() => {
+    return () => {
+      if (!activeFileId) return;
+      const viewState = editorRef.current?.saveViewState();
+      if (viewState) {
+        saveViewState(activeFileId, viewState);
+      }
+    };
+  }, [activeFileId, saveViewState]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor || !activeFileId) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      const storedViewState = getViewState(activeFileId) as Monaco.editor.ICodeEditorViewState | null;
+      if (storedViewState) {
+        editor.restoreViewState(storedViewState);
+        editor.render();
+      }
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activeFileId, getViewState]);
+
   const handleEditorDidMount: OnMount = (editor, monaco) => {
     monacoRef.current = monaco;
     editorRef.current = editor;
@@ -211,6 +248,16 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
 
     editor.onDidChangeCursorPosition((e) => {
       onCursorChange?.(e.position.lineNumber, e.position.column);
+    });
+
+    editor.onDidChangeHiddenAreas(() => {
+      const currentFileId = activeFileIdRef.current;
+      if (!currentFileId) return;
+
+      const viewState = editor.saveViewState();
+      if (viewState) {
+        saveViewState(currentFileId, viewState);
+      }
     });
 
     monaco.editor.defineTheme("stellar-dark", {
@@ -336,6 +383,42 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
     if (!rustProviderRegistered.current) {
       rustProviderRegistered.current = true;
 
+      monaco.languages.setLanguageConfiguration("rust", {
+        comments: {
+          lineComment: "//",
+          blockComment: ["/*", "*/"],
+        },
+        brackets: [
+          ["{", "}"],
+          ["[", "]"],
+          ["(", ")"],
+        ],
+        autoClosingPairs: [
+          { open: "{", close: "}" },
+          { open: "[", close: "]" },
+          { open: "(", close: ")" },
+          { open: "\"", close: "\"" },
+        ],
+        surroundingPairs: [
+          { open: "{", close: "}" },
+          { open: "[", close: "]" },
+          { open: "(", close: ")" },
+          { open: "\"", close: "\"" },
+        ],
+        folding: {
+          markers: {
+            start: RUST_FOLD_REGION_START,
+            end: RUST_FOLD_REGION_END,
+          },
+          offSide: false,
+        },
+      });
+
+      monaco.languages.registerFoldingRangeProvider(
+        "rust",
+        createRustFoldingRangeProvider(),
+      );
+
       monaco.languages.registerCompletionItemProvider("rust", {
         triggerCharacters: [".", ":", " "], // 👈 IMPORTANT
 
@@ -386,6 +469,8 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
               insertTextRules:
                 monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
             },
+            // Proptest snippets — all categories
+            ...getAllMonacoCompletions(monaco),
           ];
 
           return { suggestions };
@@ -491,6 +576,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
         >
           <Editor
             height="100%"
+            path={activeFileId}
             defaultLanguage={
               activeFile.language ||
               (activeFile.name?.endsWith(".toml") ? "toml" : "rust")
@@ -501,6 +587,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
             }
             value={activeFile.content}
             theme="stellar-dark"
+            saveViewState={false}
             onChange={handleEditorChange}
             onMount={handleEditorDidMount}
             options={{
@@ -512,6 +599,10 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
               lineNumbers: "on",
               glyphMargin: true,
               folding: true,
+              foldingStrategy: "auto",
+              foldingHighlight: true,
+              showFoldingControls: "always",
+              unfoldOnClickAfterEndOfLine: false,
               lineDecorationsWidth: 10,
               lineNumbersMinChars: 3,
               fontFamily:

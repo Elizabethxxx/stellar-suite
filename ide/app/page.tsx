@@ -2,10 +2,11 @@
 
 import { CommandPalette } from "@/components/ide/CommandPalette";
 import { MobileGatekeeper } from "@/components/ide/MobileGatekeeper";
+import { QuickOpen } from "@/components/ide/QuickOpen";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Index from "@/features/ide/Index";
+import XdrInspector from "@/components/tools/XdrInspector";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 
@@ -59,7 +60,9 @@ export default function HomePage() {
         <Toaster />
         <Sonner />
         <MobileGatekeeper />
+        <XdrInspector />
         <Index />
+        <QuickOpen />
         <CommandPalette
           open={commandPaletteOpen}
           onOpenChange={setCommandPaletteOpen}

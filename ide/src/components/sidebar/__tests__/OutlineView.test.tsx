@@ -17,7 +17,10 @@ describe("OutlineView", () => {
     // Default editor store mock
     vi.mocked(useEditorStore).mockReturnValue({
       jumpToLine: mockJumpToLine,
+      viewStates: {},
       setJumpToLine: vi.fn(),
+      saveViewState: vi.fn(),
+      getViewState: vi.fn(),
     });
   });
 

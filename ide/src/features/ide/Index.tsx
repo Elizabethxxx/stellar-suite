@@ -1,40 +1,47 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  PanelRightClose,
-  PanelRightOpen,
-} from "lucide-react";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
 
 import CodeEditor from "@/components/ide/CodeEditor";
 import { ContractPanel } from "@/components/ide/ContractPanel";
 import { DeploymentsView } from "@/components/ide/DeploymentsView";
 import { GitPane } from "@/components/ide/GitPane";
 import { DiffEditorPane } from "@/components/editor/DiffEditorPane";
-import { EditorTabs } from "@/components/ide/EditorTabs";
+// import { EditorTabs } from "@/components/ide/EditorTabs";
 import { FileExplorer } from "@/components/ide/FileExplorer";
 import { IdentitiesView } from "@/components/ide/IdentitiesView";
 import { OracleAssistant } from "@/components/ide/OracleAssistant";
 import { SearchPane } from "@/components/ide/SearchPane";
 import { SecurityView } from "@/components/ide/SecurityView";
+import { TestingView, TemplatesView } from "@/components/ide/TestingView";
+import { GeneratePropertyTest } from "@/components/Testing/GeneratePropertyTest";
+import { useProptestOutputWatcher } from "@/hooks/useProptestOutputWatcher";
+import { EventsPane } from "@/components/ide/EventsPane";
 import { StatusBar } from "@/components/ide/StatusBar";
 import { Terminal } from "@/components/ide/Terminal";
-import TestExplorer from "@/components/ide/TestExplorer";
-import { Toolbar } from "@/components/ide/Toolbar";
+// import TestExplorer from "@/components/ide/TestExplorer";
+import XdrInspector from "@/components/tools/XdrInspector";
+// import { Toolbar } from "@/components/ide/Toolbar";
 import { OutlineView } from "@/components/sidebar/OutlineView";
-import { ActivityBar } from "@/components/layout/ActivityBar";
+// import { ActivityBar } from "@/components/layout/ActivityBar";
 import { type NetworkKey } from "@/lib/networkConfig";
 import { type FileNode } from "@/lib/sample-contracts";
 import { useDeployedContractsStore } from "@/store/useDeployedContractsStore";
 import { useDiagnosticsStore } from "@/store/useDiagnosticsStore";
 import { useIdentityStore } from "@/store/useIdentityStore";
 import { useWorkspaceStore, flattenWorkspaceFiles } from "@/store/workspaceStore";
+import { useVCSStore } from "@/store/vcsStore";
 import { parseCargoAuditOutput } from "@/utils/cargoAuditParser";
 import { parseMixedOutput } from "@/utils/cargoParser";
 import { parseClippyOutput, type ClippyLint } from "@/utils/clippyParser";
-import { createStreamProcessor, readCompileResponse } from "@/utils/compileStream";
+import {
+  createStreamProcessor,
+  readCompileResponse,
+} from "@/utils/compileStream";
 
-const COMPILE_API_URL = process.env.NEXT_PUBLIC_COMPILE_API_URL ?? "/api/compile";
+const COMPILE_API_URL =
+  process.env.NEXT_PUBLIC_COMPILE_API_URL ?? "/api/compile";
 
 const toCompilePath = (pathParts: string[]) => {
   if (pathParts.length === 2 && pathParts[1].endsWith(".rs")) {
@@ -85,7 +92,8 @@ const replaceByLineColumn = (
   const startLineIndex = Math.max(0, startLine - 1);
   const endLineIndex = Math.max(0, endLine - 1);
 
-  const prefix = lines[startLineIndex]?.slice(0, Math.max(0, startCol - 1)) ?? "";
+  const prefix =
+    lines[startLineIndex]?.slice(0, Math.max(0, startCol - 1)) ?? "";
   const suffix = lines[endLineIndex]?.slice(Math.max(0, endCol - 1)) ?? "";
 
   const before = lines.slice(0, startLineIndex).join("\n");
@@ -103,6 +111,40 @@ const formatRunTime = () =>
     second: "2-digit",
   });
 
+// ---------------------------------------------------------------------------
+// TestingSidebar — three sub-tabs: Snippets | Templates | Generate
+// ---------------------------------------------------------------------------
+
+function TestingSidebar() {
+  const [tab, setTab] = useState<"snippets" | "templates" | "generate">("snippets");
+  return (
+    <div className="flex h-full flex-col">
+      {/* Sub-tab bar */}
+      <div className="flex shrink-0 border-b border-sidebar-border">
+        {(["snippets", "templates", "generate"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`flex-1 py-1.5 font-mono text-[10px] uppercase tracking-wider transition-colors border-b-2 ${
+              tab === t
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {t === "snippets" ? "Snippets" : t === "templates" ? "Templates" : "Generate"}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {tab === "snippets"  && <TestingView />}
+        {tab === "templates" && <TemplatesView />}
+        {tab === "generate"  && <GeneratePropertyTest />}
+      </div>
+    </div>
+  );
+}
+
 export default function Index() {
   const {
     files,
@@ -114,6 +156,7 @@ export default function Index() {
     showExplorer,
     showPanel,
     leftSidebarTab,
+    hydrationComplete,
     setIsCompiling,
     setBuildState,
     setContractId,
@@ -132,8 +175,12 @@ export default function Index() {
   } = useWorkspaceStore();
 
   const { activeContext, activeIdentity, loadIdentities } = useIdentityStore();
+  const { localRepoInitialized, hydrateLocalRepo, refreshLocalStatuses } =
+    useVCSStore();
   const { setDiagnostics, clearDiagnostics } = useDiagnosticsStore();
   const { addContract } = useDeployedContractsStore();
+
+  const [bottomTab, setBottomTab] = useState<"console" | "events" | "proptest">("console");
 
   const [invokeState, setInvokeState] = useState<{
     phase: "idle" | "preparing" | "success" | "failed";
@@ -145,7 +192,9 @@ export default function Index() {
   const [clippyError, setClippyError] = useState<string | null>(null);
   const [lastClippyRunAt, setLastClippyRunAt] = useState<string | null>(null);
 
-  const [auditFindings, setAuditFindings] = useState<ReturnType<typeof parseCargoAuditOutput>["findings"]>([]);
+  const [auditFindings, setAuditFindings] = useState<
+    ReturnType<typeof parseCargoAuditOutput>["findings"]
+  >([]);
   const [isRunningAudit, setIsRunningAudit] = useState(false);
   const [auditError, setAuditError] = useState<string | null>(null);
   const [lastAuditRunAt, setLastAuditRunAt] = useState<string | null>(null);
@@ -153,6 +202,30 @@ export default function Index() {
   useEffect(() => {
     loadIdentities();
   }, [loadIdentities]);
+
+  // Watch terminal output and drive the proptest store in real time
+  useProptestOutputWatcher();
+  useEffect(() => {
+    if (!hydrationComplete) {
+      return;
+    }
+
+    void hydrateLocalRepo(flattenWorkspaceFiles(files));
+  }, [files, hydrateLocalRepo, hydrationComplete]);
+
+  useEffect(() => {
+    if (!hydrationComplete || !localRepoInitialized) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshLocalStatuses(
+        flattenWorkspaceFiles(useWorkspaceStore.getState().files),
+      );
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [hydrationComplete, localRepoInitialized, refreshLocalStatuses]);
 
   const contractName = useMemo(
     () => activeTabPath[0] ?? files[0]?.name ?? "hello_world",
@@ -177,7 +250,9 @@ export default function Index() {
     appendTerminalOutput("> Compiling contract...\r\n");
     appendTerminalOutput(`Target network: ${network}\r\n`);
 
-    const processor = createStreamProcessor({ onTerminalData: appendTerminalOutput });
+    const processor = createStreamProcessor({
+      onTerminalData: appendTerminalOutput,
+    });
 
     try {
       const response = await fetch(COMPILE_API_URL, {
@@ -191,7 +266,10 @@ export default function Index() {
       setDiagnostics(diagnostics);
 
       if (!response.ok) {
-        throw new Error(output.trim() || `Build request failed with status ${response.status}`);
+        throw new Error(
+          output.trim() ||
+            `Build request failed with status ${response.status}`,
+        );
       }
 
       appendTerminalOutput("✓ Compilation finished.\r\n");
@@ -245,30 +323,38 @@ export default function Index() {
       const parsedDiagnostics = parseMixedOutput(output, contractName);
 
       setDiagnostics(
-        parsedDiagnostics.length > 0 ? parsedDiagnostics : parsedClippy.diagnostics,
+        parsedDiagnostics.length > 0
+          ? parsedDiagnostics
+          : parsedClippy.diagnostics,
       );
       setClippyLints(parsedClippy.lints);
       setLastClippyRunAt(formatRunTime());
 
       if (!response.ok || payload.error) {
-        const message = payload.error || `Clippy request failed (status ${response.status})`;
+        const message =
+          payload.error || `Clippy request failed (status ${response.status})`;
         setClippyError(message);
       }
 
-      appendTerminalOutput(
-        `${output || "No Clippy output returned."}\r\n`,
-      );
+      appendTerminalOutput(`${output || "No Clippy output returned."}\r\n`);
       appendTerminalOutput(
         `Clippy finished with ${parsedClippy.lints.length} lint(s).\r\n`,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Clippy request failed";
+      const message =
+        error instanceof Error ? error.message : "Clippy request failed";
       setClippyError(message);
       appendTerminalOutput(`Clippy failed: ${message}\r\n`);
     } finally {
       setIsRunningClippy(false);
     }
-  }, [appendTerminalOutput, compilePayload.files, contractName, setDiagnostics, setTerminalExpanded]);
+  }, [
+    appendTerminalOutput,
+    compilePayload.files,
+    contractName,
+    setDiagnostics,
+    setTerminalExpanded,
+  ]);
 
   const handleRunAudit = useCallback(async () => {
     setIsRunningAudit(true);
@@ -296,7 +382,7 @@ export default function Index() {
 
       const rawOutput = payload.stdout?.trim().length
         ? payload.stdout
-        : payload.stderr ?? "";
+        : (payload.stderr ?? "");
 
       const parsedAudit = parseCargoAuditOutput(rawOutput);
       setAuditFindings(parsedAudit.findings);
@@ -318,13 +404,19 @@ export default function Index() {
         `Audit finished with ${parsedAudit.findings.length} vulnerability finding(s).\r\n`,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Audit request failed";
+      const message =
+        error instanceof Error ? error.message : "Audit request failed";
       setAuditError(message);
       appendTerminalOutput(`Audit failed: ${message}\r\n`);
     } finally {
       setIsRunningAudit(false);
     }
-  }, [appendTerminalOutput, compilePayload.files, contractName, setTerminalExpanded]);
+  }, [
+    appendTerminalOutput,
+    compilePayload.files,
+    contractName,
+    setTerminalExpanded,
+  ]);
 
   const handleApplyClippyFix = useCallback(
     (lint: ClippyLint) => {
@@ -336,7 +428,9 @@ export default function Index() {
       const file = findNode(files, filePath);
 
       if (!file || file.type !== "file") {
-        setClippyError(`Unable to apply fix: file '${lint.autoFix.fileId}' not found.`);
+        setClippyError(
+          `Unable to apply fix: file '${lint.autoFix.fileId}' not found.`,
+        );
         return;
       }
 
@@ -370,17 +464,24 @@ export default function Index() {
       addContract(fullId, network, contractName);
       appendTerminalOutput(`✓ Contract deployed! ID: ${fullId}\r\n`);
     }, 1200);
-  }, [addContract, appendTerminalOutput, contractName, network, setContractId, setTerminalExpanded]);
+  }, [
+    addContract,
+    appendTerminalOutput,
+    contractName,
+    network,
+    setContractId,
+    setTerminalExpanded,
+  ]);
 
   const handleTest = useCallback(() => {
     setTerminalExpanded(true);
 
     if (mockLedgerState.entries.length > 0) {
       appendTerminalOutput(
-        `Injecting ${mockLedgerState.entries.length} mock ledger ${mockLedgerState.entries.length === 1 ? "entry" : "entries"} via --ledger-snapshot...\r\n`
+        `Injecting ${mockLedgerState.entries.length} mock ledger ${mockLedgerState.entries.length === 1 ? "entry" : "entries"} via --ledger-snapshot...\r\n`,
       );
       appendTerminalOutput(
-        `Mock state: ${JSON.stringify(mockLedgerState)}\r\n`
+        `Mock state: ${JSON.stringify(mockLedgerState)}\r\n`,
       );
     }
 
@@ -402,7 +503,7 @@ export default function Index() {
       const signer =
         activeContext?.type === "web-wallet"
           ? "browser-wallet"
-          : activeIdentity?.nickname ?? "anonymous";
+          : (activeIdentity?.nickname ?? "anonymous");
 
       appendTerminalOutput(`Invoking ${fn}(${args}) as ${signer}...\r\n`);
       setInvokeState({ phase: "preparing", message: "Preparing..." });
@@ -415,7 +516,13 @@ export default function Index() {
         }, 1500);
       }, 900);
     },
-    [activeContext, activeIdentity, appendTerminalOutput, contractId, setTerminalExpanded],
+    [
+      activeContext,
+      activeIdentity,
+      appendTerminalOutput,
+      contractId,
+      setTerminalExpanded,
+    ],
   );
 
   const activeFileContext = useMemo(() => {
@@ -433,7 +540,7 @@ export default function Index() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden">
-      <Toolbar
+      {/* <Toolbar
         onCompile={handleCompile}
         onDeploy={handleDeploy}
         onTest={handleTest}
@@ -445,10 +552,10 @@ export default function Index() {
         isRunningClippy={isRunningClippy}
         onRunAudit={handleRunAudit}
         isRunningAudit={isRunningAudit}
-      />
+      /> */}
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <ActivityBar
+        {/* <ActivityBar
           activeTab={leftSidebarTab}
           onTabChange={(tab) => {
             if (leftSidebarTab === tab && showExplorer) {
@@ -461,7 +568,7 @@ export default function Index() {
           }}
           sidebarVisible={showExplorer}
           onToggleSidebar={() => setShowExplorer(!showExplorer)}
-        />
+        /> */}
 
         {showExplorer ? (
           <aside className="hidden w-72 shrink-0 border-r border-border bg-sidebar md:block">
@@ -478,7 +585,9 @@ export default function Index() {
                 }}
               />
             ) : null}
-            {leftSidebarTab === "identities" ? <IdentitiesView network={network} /> : null}
+            {leftSidebarTab === "identities" ? (
+              <IdentitiesView network={network} />
+            ) : null}
             {leftSidebarTab === "search" ? (
               <SearchPane
                 onResultSelect={(pathParts, _range) => {
@@ -489,20 +598,26 @@ export default function Index() {
             ) : null}
             {leftSidebarTab === "outline" ? <OutlineView /> : null}
             {leftSidebarTab === "security" ? (
-              <SecurityView
-                clippyLints={clippyLints}
-                clippyRunning={isRunningClippy}
-                clippyError={clippyError}
-                onRunClippy={handleRunClippy}
-                onApplyClippyFix={handleApplyClippyFix}
-                auditFindings={auditFindings}
-                auditRunning={isRunningAudit}
-                auditError={auditError}
-                onRunAudit={handleRunAudit}
-                lastClippyRunAt={lastClippyRunAt}
-                lastAuditRunAt={lastAuditRunAt}
-              />
+              <div className="h-full overflow-y-auto">
+                <SecurityView
+                  clippyLints={clippyLints}
+                  clippyRunning={isRunningClippy}
+                  clippyError={clippyError}
+                  onRunClippy={handleRunClippy}
+                  onApplyClippyFix={handleApplyClippyFix}
+                  auditFindings={auditFindings}
+                  auditRunning={isRunningAudit}
+                  auditError={auditError}
+                  onRunAudit={handleRunAudit}
+                  lastClippyRunAt={lastClippyRunAt}
+                  lastAuditRunAt={lastAuditRunAt}
+                />
+                <div className="border-t border-border">
+                  <XdrInspector />
+                </div>
+              </div>
             ) : null}
+            {/*
             {leftSidebarTab === "tests" ? (
               <TestExplorer
                 files={flattenWorkspaceFiles(files)}
@@ -516,21 +631,22 @@ export default function Index() {
                   setTerminalExpanded(true);
                   if (mockLedgerState.entries.length > 0) {
                     appendTerminalOutput(
-                      `Injecting ${mockLedgerState.entries.length} mock ledger ${mockLedgerState.entries.length === 1 ? "entry" : "entries"} via --ledger-snapshot...\r\n`
+                      `Injecting ${mockLedgerState.entries.length} mock ledger ${mockLedgerState.entries.length === 1 ? "entry" : "entries"} via --ledger-snapshot...\r\n`,
                     );
                   }
                   appendTerminalOutput(
-                    `Running test ${test.testName} (${test.kind}) in ${test.filePath}:${test.line}\r\n`
+                    `Running test ${test.testName} (${test.kind}) in ${test.filePath}:${test.line}\r\n`,
                   );
                 }}
               />
             ) : null}
+            */}
             {leftSidebarTab === "git" ? <GitPane /> : null}
           </aside>
         ) : null}
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <EditorTabs />
+          {/* <EditorTabs /> */}
           <div className="min-h-0 flex-1 overflow-hidden">
             {diffViewPath ? (
               <DiffEditorPane
@@ -542,15 +658,54 @@ export default function Index() {
               <CodeEditor />
             )}
           </div>
-          <div className="h-56 shrink-0 border-t border-border">
-            <Terminal />
+          <div className="h-56 shrink-0 border-t border-border flex flex-col">
+            {/* Bottom panel tab bar */}
+            <div
+              className="flex shrink-0 items-center border-b border-border bg-secondary"
+              role="tablist"
+              aria-label="Bottom panel tabs"
+            >
+              {(
+                [
+                  { id: "console",  label: "Console"  },
+                  { id: "events",   label: "Events"   },
+                  { id: "proptest", label: "Proptest" },
+                ] as const
+              ).map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === tab.id}
+                  onClick={() => setBottomTab(tab.id)}
+                  className={`px-3 py-1.5 font-mono text-[11px] uppercase tracking-wider transition-colors border-b-2 ${
+                    bottomTab === tab.id
+                      ? "border-primary text-foreground"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab panels */}
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {bottomTab === "console"  && <Terminal />}
+              {bottomTab === "events"   && <EventsPane />}
+              {bottomTab === "proptest" && <ProptestView />}
+            </div>
           </div>
         </main>
 
         <aside className="hidden md:flex">
           {showPanel ? (
             <div className="w-80 border-l border-border bg-card">
-              <ContractPanel contractId={contractId} onInvoke={handleInvoke} invokeState={invokeState} />
+              <ContractPanel
+                contractId={contractId}
+                onInvoke={handleInvoke}
+                invokeState={invokeState}
+              />
             </div>
           ) : null}
 
@@ -561,7 +716,11 @@ export default function Index() {
               title="Toggle Panel"
               aria-label="Toggle panel"
             >
-              {showPanel ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              {showPanel ? (
+                <PanelRightClose className="h-4 w-4" />
+              ) : (
+                <PanelRightOpen className="h-4 w-4" />
+              )}
             </button>
           </div>
         </aside>
