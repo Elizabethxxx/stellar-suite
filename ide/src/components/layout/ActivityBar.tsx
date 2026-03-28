@@ -15,6 +15,7 @@ import {
   Library,
   FileSearch,
   Binary,
+  BarChart2,
 } from "lucide-react";
 import { ReactNode } from "react";
 
@@ -28,9 +29,11 @@ export type ActivityTab =
   | "tests"
   | "fuzzing"
   | "outline"
-  | "inspector"
   | "references"
-  | "binary-diff";
+  | "binary-diff"
+  | "oracle"
+  | "benchmarks"
+  | "inspector";
 
 interface ActivityBarProps {
   activeTab: ActivityTab;
@@ -118,6 +121,12 @@ const tabs: ActivityBarTab[] = [
     icon: <Library className="h-5 w-5" />,
     label: "References",
     title: "Find All References",
+  },
+  {
+    id: "benchmarks",
+    icon: <BarChart2 className="h-5 w-5" />,
+    label: "Benchmarks",
+    title: "Criterion Benchmark Dashboard",
   },
 ];
 

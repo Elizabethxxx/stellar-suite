@@ -43,9 +43,9 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
   const { openErrorHelp } = useErrorHelpStore();
   const rustProviderRegistered = useRef(false);
 
-  const monacoRef = useRef<typeof Monaco | null>(null);
-  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
-  const semanticProviderRegistered = useRef(false);
+    const monacoRef = useRef<typeof Monaco | null>(null);
+    const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+    const semanticProviderRegistered = useRef(false);
   const coverageDecorations = useRef<Monaco.editor.IEditorDecorationsCollection | null>(null);
   const codeActionProviderRegistered = useRef(false);
 
@@ -55,7 +55,10 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
   const [headContent, setHeadContent] = useState<string>("");
   const activeFileId = activeTabPath.join("/");
   const activeFileIdRef = useRef(activeFileId);
-  // Keep a live ref to files so the rename provider always sees the latest state
+
+    useTestGutter({ editor: editorRef.current, monaco: monacoRef.current, filePath: activeFileId });
+
+    // Keep a live ref to files so the rename provider always sees the latest state
   const filesRef = useRef(files);
   useEffect(() => { filesRef.current = files; }, [files]);
   useEffect(() => {
