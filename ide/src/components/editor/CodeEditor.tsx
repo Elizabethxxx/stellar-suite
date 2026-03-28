@@ -27,6 +27,7 @@ import { useTestGutter } from "@/hooks/useTestGutter";
 import { GitGutterMarkers } from "./GitGutterMarkers";
 import { git } from "@/lib/git";
 import "@/styles/editor-gutter.css";
+import { referenceProvider } from "@/lib/referenceProvider";
 
 interface CodeEditorProps {
   onCursorChange?: (line: number, col: number) => void;
@@ -238,6 +239,8 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
     definitionProvider.initialize(editor, monaco);
     definitionProvider.registerDefinitionProvider(monaco);
     definitionProvider.registerOnDefinitionHandler(monaco);
+    referenceProvider.initialize(monaco);
+    referenceProvider.register(monaco);
 
     // Listen for file open requests from definition provider
     const handleFileOpen = (event: CustomEvent) => {
@@ -273,6 +276,14 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
       editor.setPosition({ lineNumber: line, column: 1 });
       editor.focus();
     });
+
+    const handleJumpToPosition = (event: CustomEvent) => {
+      const { line, column } = event.detail;
+      editor.revealPositionInCenter({ lineNumber: line, column });
+      editor.setPosition({ lineNumber: line, column });
+      editor.focus();
+    };
+    window.addEventListener("jumpToPosition", handleJumpToPosition as EventListener);
 
     editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
       onSave?.();
@@ -626,6 +637,7 @@ const CodeEditor: React.FC<CodeEditorProps> = ({ onCursorChange, onSave }) => {
     // Cleanup function
     return () => {
       window.removeEventListener("openFile", handleFileOpen as EventListener);
+      window.removeEventListener("jumpToPosition", handleJumpToPosition as EventListener);
     };
   };
 
