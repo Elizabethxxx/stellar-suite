@@ -37,7 +37,8 @@ export type ActivityTab =
   | "binary-diff"
   | "oracle"
   | "benchmarks"
-  | "inspector";
+  | "inspector"
+  | "assets";
 
 interface ActivityBarProps {
   activeTab: ActivityTab;

@@ -30,7 +30,6 @@ import { ProptestView } from "@/components/Panels/ProptestView";
 import { EventsPane } from "@/components/ide/EventsPane";
 import { ReferencesPane } from "@/components/ide/ReferencesPane";
 import { InspectorPane } from "@/components/ide/InspectorPane";
-import { ProptestView } from "@/components/Panels/ProptestView";
 import { StatusBar } from "@/components/ide/StatusBar";
 import { Terminal } from "@/components/ide/Terminal";
 import { useTerminalBridge } from "@/hooks/useTerminalBridge";
@@ -40,6 +39,7 @@ import XdrInspector from "@/components/tools/XdrInspector";
 import { Toolbar } from "@/components/ide/Toolbar";
 import { OutlineView } from "@/components/sidebar/OutlineView";
 import { FuzzingPanel } from "@/components/sidebar/FuzzingPanel";
+import { AssetManager } from "@/components/sidebar/AssetManager";
 // import { ActivityBar } from "@/components/layout/ActivityBar";
 import { StarterProjectWizard } from "@/components/modals/StarterProjectWizard";
 import { ActivityBar } from "@/components/layout/ActivityBar";
@@ -1003,6 +1003,7 @@ export default function Index() {
             {leftSidebarTab === "benchmarks" ? <BenchmarkDashboard /> : null}
             {leftSidebarTab === "multisig" ? <MultisigView network={network} /> : null}
             {leftSidebarTab === "liquidity" ? <LiquidityPoolSimulator /> : null}
+            {leftSidebarTab === "assets" ? <AssetManager /> : null}
           </aside>
         ) : null}
 
