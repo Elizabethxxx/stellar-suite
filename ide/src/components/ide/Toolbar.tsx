@@ -34,6 +34,7 @@ import { LiveShareButton } from "@/components/ide/LiveShareButton";
 import { useLiveShareStore } from "@/store/useLiveShareStore";
 
 import NotificationCenter from "@/components/notifications/NotificationCenter";
+import { LayoutPicker } from "@/components/ide/LayoutPicker";
 
 type BuildState = "idle" | "building" | "success" | "error";
 
@@ -204,6 +205,8 @@ export function Toolbar({
           ) : null}
 
           <GitBlameToggle />
+
+          <LayoutPicker />
 
           <Button
             onClick={() => setImportOpen(true)}

@@ -44,6 +44,7 @@ import { AssetManager } from "@/components/sidebar/AssetManager";
 import { StarterProjectWizard } from "@/components/modals/StarterProjectWizard";
 import { ActivityBar } from "@/components/layout/ActivityBar";
 import { NETWORK_CONFIG, type NetworkKey } from "@/lib/networkConfig";
+import { useLayoutStore } from "@/lib/layout/layoutStore";
 import { BenchmarkDashboard } from "@/components/charts/BenchmarkDashboard";
 import { type FileNode } from "@/lib/sample-contracts";
 import {
@@ -355,6 +356,25 @@ export default function Index() {
     window.addEventListener("referencesFound", handleRefTab);
     return () => window.removeEventListener("referencesFound", handleRefTab);
   }, [setLeftSidebarTab, setShowExplorer]);
+
+  const { snapshots, setActiveSnapshotId } = useLayoutStore();
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!e.altKey) return;
+      const index = parseInt(e.key, 10);
+      if (isNaN(index) || index < 1 || index > 9) return;
+      const snapshot = snapshots[index - 1];
+      if (!snapshot) return;
+      e.preventDefault();
+      setShowExplorer(snapshot.showExplorer);
+      setShowPanel(snapshot.showPanel);
+      setLeftSidebarTab(snapshot.leftSidebarTab);
+      setActiveSnapshotId(snapshot.id);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [snapshots, setShowExplorer, setShowPanel, setLeftSidebarTab, setActiveSnapshotId]);
 
   const contractName = useMemo(
     () => activeTabPath[0] ?? files[0]?.name ?? "hello_world",
