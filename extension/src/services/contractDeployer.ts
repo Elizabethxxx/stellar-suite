@@ -19,8 +19,16 @@ function getEnvironmentWithPath(): NodeJS.ProcessEnv {
         '/opt/homebrew/sbin'
     ];
     
+const additionalPath = [
+        cargoBin,
+        path.join(homeDir, '.local', 'bin'),
+        '/usr/local/bin',
+        '/opt/homebrew/bin',
+        '/opt/homebrew/sbin'
+    ];
+
     const currentPath = env.PATH || env.Path || '';
-    env.PATH = [...additionalPaths, currentPath].filter(Boolean).join(path.delimiter);
+    env.PATH = [...additionalPath, currentPath].filter(Boolean).join(path.delimiter);
     env.Path = env.PATH;
     
     return env;
