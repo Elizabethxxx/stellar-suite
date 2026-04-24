@@ -25,7 +25,7 @@ import React, { Suspense, useEffect, useRef, useState } from "react";
 import { analyzeMathSafety } from "../../lib/mathSafetyAnalyzer";
 import { useMathSafetyStore } from "../../store/useMathSafetyStore";
 import { useUserSettingsStore } from "@/store/useUserSettingsStore";
-import { Breadcrumbs } from "./Breadcrumbs";
+import { Breadcrumbs } from "@/components/ide/Breadcrumbs";
 import { GitBlameLines } from "./GitBlameLines";
 import { getAllMonacoCompletions } from "@/utils/proptestSnippets";
 import { useTestGutter } from "@/hooks/useTestGutter";

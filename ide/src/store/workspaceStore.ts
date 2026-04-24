@@ -41,7 +41,8 @@ export type SidebarTab =
   | "benchmarks"
   | "audit"
   | "assets"
-  | "tutorials";
+  | "tutorials"
+  | "network";
 export type BuildState = "idle" | "building" | "success" | "error";
 
 export interface WorkspaceTextFile {

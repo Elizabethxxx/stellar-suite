@@ -21,6 +21,7 @@ import {
   ClipboardList,
   MessageSquare,
   GraduationCap,
+  Globe,
 } from "lucide-react";
 import { ReactNode } from "react";
 
@@ -31,7 +32,8 @@ export type ActivityTab =
   | "identities"
   | "search"
   | "security"
-  | "tests";
+  | "tests"
+  | "network";
 
 interface ActivityBarProps {
   activeTab: ActivityTab;
@@ -89,6 +91,12 @@ const tabs: ActivityBarTab[] = [
     icon: <Beaker className="h-5 w-5" />,
     label: "Tests",
     title: "Test Explorer",
+  },
+  {
+    id: "network",
+    icon: <Globe className="h-5 w-5" />,
+    label: "Network",
+    title: "Network Explorer",
   },
 ];
 

@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { contract } from "@stellar/stellar-sdk";
+import { Api, Server } from "@stellar/stellar-sdk/rpc";
 import {
   PanelRightClose,
   PanelRightOpen,
@@ -9,6 +11,8 @@ import {
 import { toast } from "sonner";
 
 import { FileExplorer } from "@/components/ide/FileExplorer";
+import { NetworkExplorer } from "@/components/ide/NetworkExplorer";
+import { StateExplorer } from "@/components/ide/StateExplorer";
 import { ContractPanel } from "@/components/ide/ContractPanel";
 import { DeploymentStepper } from "@/components/ide/DeploymentStepper";
 import { SidebarTab } from "@/store/workspaceStore";
@@ -27,6 +31,7 @@ import { useLayoutStore } from "@/lib/layout/layoutStore";
 import { DeploymentsView } from "@/components/ide/DeploymentsView";
 import { GitPane } from "@/components/ide/GitPane";
 import CodeEditor from "@/components/ide/CodeEditor";
+import { SplitLayout } from "@/components/layout/SplitLayout";
 import { Toolbar } from "@/components/ide/Toolbar";
 import { StarterProjectWizard } from "@/components/modals/StarterProjectWizard";
 import { ActivityBar, type ActivityTab } from "@/components/layout/ActivityBar";
@@ -57,12 +62,12 @@ import ErrorHelpPanel from "@/components/ide/ErrorHelpPanel";
 import { useCloudSyncStore } from "@/store/useCloudSyncStore";
 import { ConflictModal } from "@/components/cloud/ConflictModal";
 import { parseCargoAuditOutput } from "@/utils/cargoAuditParser";
-import { parseMixedOutput } from "@/utils/cargoParser";
-import { parseClippyOutput, type ClippyLint } from "@/utils/clippyParser";
+import { type ClippyLint } from "@/utils/clippyParser";
 import {
   createStreamProcessor,
   readCompileResponse,
 } from "@/utils/compileStream";
+import { getDiagnosticsWorker } from "./workers/DiagnosticsWorker";
 import {
   createStructuredTestOutputFromCargoRun,
   createSimulatedCargoTestOutput,
@@ -73,6 +78,11 @@ import {
   type TestRunResult,
 } from "@/lib/testResults";
 import { useCompilationWorker } from "@/hooks/useCompilationWorker";
+import {
+  buildSimulationComparison,
+  fetchCurrentLedgerEntriesForSimulation,
+} from "@/lib/simulationDiff";
+import { useTransactionResultsStore } from "@/store/useTransactionResultsStore";
 
 const COMPILE_API_URL =
   process.env.NEXT_PUBLIC_COMPILE_API_URL ?? "/api/compile";
@@ -229,7 +239,8 @@ export default function Index() {
 
   const { compile: workerCompile, cancel: cancelCompile } = useCompilationWorker();
 
-  const { activeContext, activeIdentity, loadIdentities } = useIdentityStore();
+  const { activeContext, activeIdentity, loadIdentities, webWalletPublicKey } = useIdentityStore();
+  const appendTransactionLog = useTransactionResultsStore((state) => state.appendLog);
   const { localRepoInitialized, hydrateLocalRepo, refreshLocalStatuses } =
     useVCSStore();
   const sharedEnvConfig = useSharedEnvironmentStore((s) => s.config);
@@ -265,6 +276,7 @@ export default function Index() {
   const [bottomTab, setBottomTab] = useState<"console" | "events" | "proptest">(
     "console",
   );
+  const [rightView, setRightView] = useState<"interact" | "state">("interact");
 
   const [wizardOpen, setWizardOpen] = useState(false);
 
@@ -288,7 +300,7 @@ export default function Index() {
   ]);
 
   const [invokeState, setInvokeState] = useState<{
-    phase: "idle" | "preparing" | "success" | "failed";
+    phase: "idle" | "preparing" | "signing" | "submitting" | "confirming" | "success" | "failed";
     message: string;
   }>({ phase: "idle", message: "Invoke" });
 
@@ -435,7 +447,9 @@ export default function Index() {
         onChunk: appendTerminalOutput,
       });
 
-      const diagnostics = parseMixedOutput(result.output, contractName);
+      // Offload diagnostics parsing to worker to keep UI responsive
+      const diagnosticsWorker = getDiagnosticsWorker();
+      const diagnostics = await diagnosticsWorker.parseDiagnostics(result.output, contractName);
       setDiagnostics(diagnostics);
 
       if (!result.ok) {
@@ -527,8 +541,13 @@ export default function Index() {
       };
 
       const output = `${payload.stdout ?? ""}${payload.stderr ?? ""}`;
-      const parsedClippy = parseClippyOutput(output, contractName);
-      const parsedDiagnostics = parseMixedOutput(output, contractName);
+
+      // Offload diagnostics parsing to worker to keep UI responsive
+      const diagnosticsWorker = getDiagnosticsWorker();
+      const [parsedClippy, parsedDiagnostics] = await Promise.all([
+        diagnosticsWorker.parseClippy(output, contractName),
+        diagnosticsWorker.parseDiagnostics(output, contractName)
+      ]);
 
       setDiagnostics(
         parsedDiagnostics.length > 0
@@ -1088,29 +1107,196 @@ export default function Index() {
         return;
       }
 
+      if (!activeContext) {
+        appendTerminalOutput("Invoke aborted: select a signing identity first.\r\n");
+        return;
+      }
+
       setTerminalExpanded(true);
       const signer =
         activeContext?.type === "web-wallet"
           ? "browser-wallet"
           : (activeIdentity?.nickname ?? "anonymous");
 
-      appendTerminalOutput(`Invoking ${fn}(${args}) as ${signer}...\r\n`);
-      setInvokeState({ phase: "preparing", message: "Preparing..." });
+      appendTerminalOutput(`Preparing pre-flight simulation for ${fn}(${args}) as ${signer}...\r\n`);
+      setInvokeState({ phase: "preparing", message: "Preparing pre-flight..." });
 
-      setTimeout(() => {
-        appendTerminalOutput('Result: ["ok"]\r\n');
-        setInvokeState({ phase: "success", message: "Confirmed" });
+      const startedAt = Date.now();
+      const rpcUrl =
+        network === "local"
+          ? customRpcUrl
+          : (NETWORK_CONFIG[network as NetworkKey]?.horizon ?? horizonUrl);
+
+      try {
+        const publicKey =
+          activeContext.type === "local-keypair"
+            ? activeIdentity?.publicKey
+            : webWalletPublicKey;
+
+        if (!publicKey) {
+          throw new Error("The selected signer does not have a public key available for simulation.");
+        }
+
+        const server = new Server(rpcUrl, { allowHttp: rpcUrl.startsWith("http://") });
+        const client = await contract.Client.from({
+          contractId,
+          rpcUrl,
+          networkPassphrase,
+          allowHttp: rpcUrl.startsWith("http://"),
+          publicKey,
+          server,
+        });
+
+        const method = (client as unknown as Record<string, unknown>)[fn];
+        if (typeof method !== "function") {
+          throw new Error(`Contract function "${fn}" was not found in the resolved contract spec.`);
+        }
+
+        const parsedArgs = args.trim() ? JSON.parse(args) : [];
+        const normalizedArgs = Array.isArray(parsedArgs) ? parsedArgs : [parsedArgs];
+
+        const invocationResult =
+          normalizedArgs.length === 0
+            ? await (method as (options?: Record<string, unknown>) => Promise<unknown>)({
+                publicKey,
+                restore: true,
+                timeoutInSeconds: 45,
+              })
+            : await (
+                method as (
+                  methodArgs: unknown[],
+                  options?: Record<string, unknown>,
+                ) => Promise<unknown>
+              )(normalizedArgs, {
+                publicKey,
+                restore: true,
+                timeoutInSeconds: 45,
+              });
+
+        const assembled = invocationResult as {
+          isReadCall?: boolean;
+          result?: unknown;
+          simulationResult?: unknown;
+          simulation?: unknown;
+          built?: unknown;
+          transaction?: unknown;
+          raw?: unknown;
+        };
+
+        let simulationPayload = assembled.simulationResult ?? assembled.simulation ?? null;
+        const simulationSource =
+          assembled.raw ??
+          assembled.transaction ??
+          assembled.built ??
+          null;
+
+        if (!simulationPayload && simulationSource) {
+          const simulationResponse = await server.simulateTransaction(
+            simulationSource as any,
+          );
+
+          if (Api.isSimulationError(simulationResponse)) {
+            throw new Error(`Simulation failed: ${simulationResponse.error}`);
+          }
+
+          if (Api.isSimulationSuccess(simulationResponse)) {
+            simulationPayload = simulationResponse;
+          }
+        }
+
+        const currentState = simulationPayload
+          ? await fetchCurrentLedgerEntriesForSimulation({
+              simulation: simulationPayload,
+              rpcUrl,
+              network,
+              customHeaders: useWorkspaceStore.getState().customHeaders,
+            })
+          : { entries: [], latestLedger: undefined };
+
+        const simulationComparison = simulationPayload
+          ? buildSimulationComparison({
+              simulation: simulationPayload,
+              currentEntries: currentState.entries,
+              latestLedger: currentState.latestLedger,
+            })
+          : null;
+
+        appendTransactionLog({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${fn}`,
+          timestamp: new Date().toISOString(),
+          network,
+          contractId,
+          fnName: fn,
+          argsJson: args,
+          status: "success",
+          txHash: null,
+          resultScValBase64: null,
+          decodedResult: assembled.result ?? null,
+          errorMessage: null,
+          durationMs: Date.now() - startedAt,
+          source: "simulate",
+          simulationComparison,
+        });
+
+        const summaryText = simulationComparison
+          ? `${simulationComparison.summary.total} keys checked, ${simulationComparison.summary.drifted} drifted`
+          : "simulation completed";
+
+        appendTerminalOutput(`Pre-flight ready: ${summaryText}.\r\n`);
+        if (simulationComparison?.feeBreakdown.minResourceFee) {
+          appendTerminalOutput(
+            `Estimated min resource fee: ${simulationComparison.feeBreakdown.minResourceFee}\r\n`,
+          );
+        }
+        if (simulationComparison?.warningText) {
+          appendTerminalOutput(`Warning: ${simulationComparison.warningText}\r\n`);
+        }
+
+        setInvokeState({ phase: "success", message: "Pre-flight Ready" });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Invocation failed";
+        appendTerminalOutput(`Pre-flight simulation failed: ${message}\r\n`);
+        appendTransactionLog({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `${Date.now()}-${fn}-error`,
+          timestamp: new Date().toISOString(),
+          network,
+          contractId,
+          fnName: fn,
+          argsJson: args,
+          status: "error",
+          txHash: null,
+          resultScValBase64: null,
+          decodedResult: null,
+          errorMessage: message,
+          durationMs: Date.now() - startedAt,
+          source: "simulate",
+          simulationComparison: null,
+        });
+        setInvokeState({ phase: "failed", message: "Pre-flight Failed" });
+      } finally {
         setTimeout(() => {
           setInvokeState({ phase: "idle", message: "Invoke" });
         }, 1500);
-      }, 900);
+      }
     },
     [
       activeContext,
       activeIdentity,
+      appendTransactionLog,
       appendTerminalOutput,
       contractId,
+      customRpcUrl,
+      horizonUrl,
+      network,
+      networkPassphrase,
       setTerminalExpanded,
+      webWalletPublicKey,
     ],
   );
 
@@ -1200,12 +1386,16 @@ export default function Index() {
             ) : null}
             {leftSidebarTab === "tests" ? <TestingView /> : null}
             {leftSidebarTab === "git" ? <GitPane /> : null}
+            {leftSidebarTab === "network" ? (
+              <NetworkExplorer network={network} />
+            ) : null}
           </aside>
         ) : null}
 
         <main id="main-content" className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* <EditorTabs /> */}
-            <CodeEditor />
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <SplitLayout />
+          </div>
           <div className="h-56 shrink-0 border-t border-border flex flex-col">
             {/* Bottom panel tab bar */}
             <div
@@ -1264,12 +1454,34 @@ export default function Index() {
           ) : null}
 
           {showPanel ? (
-            <div className="w-80 border-l border-border bg-card">
-              <ContractPanel
-                contractId={contractId}
-                onInvoke={handleInvoke}
-                invokeState={invokeState}
-              />
+            <div className="w-80 border-l border-border bg-card flex flex-col">
+              {/* Interact / State tab bar */}
+              <div className="flex shrink-0 border-b border-border">
+                {(["interact", "state"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setRightView(v)}
+                    className={`flex-1 py-1.5 text-[10px] font-mono font-semibold uppercase tracking-wider transition-colors ${
+                      rightView === v
+                        ? "text-foreground border-b-2 border-primary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {v}
+                  </button>
+                ))}
+              </div>
+              <div className="flex-1 overflow-hidden">
+                {rightView === "interact" ? (
+                  <ContractPanel
+                    contractId={contractId}
+                    onInvoke={handleInvoke}
+                    invokeState={invokeState}
+                  />
+                ) : (
+                  <StateExplorer network={network} contractId={contractId} />
+                )}
+              </div>
             </div>
           ) : null}
 
