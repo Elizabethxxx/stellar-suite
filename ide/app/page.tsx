@@ -4,18 +4,15 @@ import { CommandPalette } from "@/components/ide/CommandPalette";
 import Index from "@/features/ide/Index";
 import { MobileGatekeeper } from "@/components/ide/MobileGatekeeper";
 import { QuickOpen } from "@/components/ide/QuickOpen";
-import { SettingsModal } from "@/components/ide/SettingsModal";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import XdrInspector from "@/components/tools/XdrInspector";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { ThemeProvider } from "@/components/providers/ThemeProvider";
 
 export default function HomePage() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [queryClient] = useState(() => new QueryClient());
 
   useEffect(() => {
@@ -23,15 +20,6 @@ export default function HomePage() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setCommandPaletteOpen((prev) => !prev);
-      }
-
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        event.shiftKey &&
-        event.key.toLowerCase() === ","
-      ) {
-        event.preventDefault();
-        setSettingsOpen(true);
       }
 
       if (
@@ -45,7 +33,6 @@ export default function HomePage() {
 
       if (event.key === "Escape") {
         setCommandPaletteOpen(false);
-        setSettingsOpen(false);
       }
     };
 
@@ -53,16 +40,11 @@ export default function HomePage() {
       setCommandPaletteOpen((prev) => !prev);
     };
 
-    const handleOpenSettings = () => {
-      setSettingsOpen(true);
-    };
-
     window.addEventListener("keydown", handleGlobalShortcuts);
     window.addEventListener(
       "ide:toggle-command-palette",
       handleToggleCommandPalette,
     );
-    window.addEventListener("ide:open-settings", handleOpenSettings);
 
     return () => {
       window.removeEventListener("keydown", handleGlobalShortcuts);
@@ -70,32 +52,23 @@ export default function HomePage() {
         "ide:toggle-command-palette",
         handleToggleCommandPalette,
       );
-      window.removeEventListener("ide:open-settings", handleOpenSettings);
     };
   }, []);
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider
-        attribute="class"
-        defaultTheme="dark"
-        enableSystem
-        disableTransitionOnChange
-      >
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <MobileGatekeeper />
-          <XdrInspector />
-          <Index />
-          <QuickOpen />
-          <CommandPalette
-            open={commandPaletteOpen}
-            onOpenChange={setCommandPaletteOpen}
-          />
-          <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} />
-        </TooltipProvider>
-      </ThemeProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <MobileGatekeeper />
+        <XdrInspector />
+        <Index />
+        <QuickOpen />
+        <CommandPalette
+          open={commandPaletteOpen}
+          onOpenChange={setCommandPaletteOpen}
+        />
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }
