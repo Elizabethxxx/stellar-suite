@@ -1,322 +1,130 @@
-# Interactive Simulation Walkthrough
+# Interactive Simulation Walkthrough Guide
 
-This guide teaches you how to use Stellar Suite's simulation features step by step. Every section includes deep-links that open the IDE with pre-filled state so you can follow along without copying and pasting.
-
----
-
-## Table of Contents
-
-1. [What is Simulation?](#what-is-simulation)
-2. [Prerequisites](#prerequisites)
-3. [Step 1 — Open a Contract in the IDE](#step-1--open-a-contract-in-the-ide)
-4. [Step 2 — Write a Minimal Soroban Contract](#step-2--write-a-minimal-soroban-contract)
-5. [Step 3 — Build and Deploy to Testnet](#step-3--build-and-deploy-to-testnet)
-6. [Step 4 — Run Your First Simulation](#step-4--run-your-first-simulation)
-7. [Step 5 — Inspect Simulation Results](#step-5--inspect-simulation-results)
-8. [Step 6 — Use the State Diff Viewer](#step-6--use-the-state-diff-viewer)
-9. [Step 7 — Profile Resource Usage](#step-7--profile-resource-usage)
-10. [Step 8 — Export and Share Simulation Results](#step-8--export-and-share-simulation-results)
-11. [Step 9 — Offline Simulation](#step-9--offline-simulation)
-12. [Troubleshooting](#troubleshooting)
-
----
-
-## What is Simulation?
-
-Simulation lets you **invoke any Soroban contract function in a sandboxed environment** before submitting a real on-chain transaction. You get:
-
-- Exact return values for any function call
-- CPU instructions, memory bytes, and ledger read/write footprints
-- A state diff showing which ledger entries change
-- Error messages with Rust-level stack traces when a call panics
-- Estimated fee breakdowns (execution fee + resource fee)
-
-No real XLM is spent during simulation. Nothing is written to the ledger.
-
----
+Welcome to the Stellar Suite IDE Simulation Guide! This interactive tutorial will walk you through the powerful simulation features of the Stellar Suite IDE, allowing you to test and validate your smart contracts in a safe, controlled environment before deploying to live networks.
 
 ## Prerequisites
 
-| Requirement | Version |
-|---|---|
-| Stellar Suite IDE | latest |
-| Freighter wallet | ≥ 5.0 (for signed simulations) |
-| Network | Testnet or Futurenet |
+Before you begin, ensure you have:
+- A Stellar Suite IDE account (or access to the IDE)
+- Basic understanding of smart contract concepts
+- A sample smart contract ready for simulation (we'll provide one if needed)
 
-> You can simulate **without a wallet** by selecting *Anonymous* as the source account. The IDE will substitute a placeholder key that the RPC node accepts for read-only calls.
+> 💡 **Tip:** If you don't have a contract ready, click [here](https://ide.stellarsuite.dev/?contract=sample&mode=simulate) to open the IDE with a pre-loaded sample contract.
 
----
+## Step-by-Step Walkthrough
 
-## Step 1 — Open a Contract in the IDE
+### Step 1: Opening the Simulation Environment
 
-Open Stellar Suite and create a new workspace. Use the **File Explorer** panel on the left to create a new Rust project:
+To start simulating your contract, navigate to the Simulation panel in the IDE.
 
-1. Click **New Project** in the sidebar.
-2. Choose the **Soroban Hello World** template.
-3. The IDE scaffolds `src/lib.rs`, `Cargo.toml`, and a `.stellar/` config folder.
+1. Open the Stellar Suite IDE: [Open IDE](https://ide.stellarsuite.dev)
+2. In the IDE, locate the **Simulation** tab in the bottom panel (or press `Ctrl+Shift+S`).
+3. Click the **New Simulation** button to create a simulation session.
 
-**Deep-link** — click the link below to open the IDE with the Hello World template pre-loaded:
+> 🔗 **Deep-link:** [Open IDE with Simulation Panel Ready](https://ide.stellarsuite.dev/?panel=simulation&mode=simulate)
 
-```
-stellar-suite://open?template=hello-world&network=testnet
-```
+### Step 2: Loading Your Contract
 
----
+You can load a contract into the simulation environment in several ways:
 
-## Step 2 — Write a Minimal Soroban Contract
+- **From File:** Click the **Load Contract** button and select your `.sol` or `.rs` file.
+- **From GitHub:** Use the **Import from GitHub** option and enter a repository URL.
+- **Use Sample:** For this tutorial, we'll use the provided ERC-20 sample contract.
 
-Replace the contents of `src/lib.rs` with the following contract. It stores a greeting message and lets callers read or update it.
+> 🔗 **Deep-link:** [Load Sample ERC-20 Contract](https://ide.stellarsuite.dev/?contract=erc20-sample&mode=simulate)
 
-```rust
-#![no_std]
-use soroban_sdk::{contract, contractimpl, contracttype, symbol_short, Env, String};
+Once loaded, your contract will appear in the editor pane with syntax highlighting and error checking.
 
-#[contracttype]
-pub enum DataKey {
-    Greeting,
-}
+### Step 3: Configuring Simulation Parameters
 
-#[contract]
-pub struct GreetingContract;
+Before running the simulation, configure the parameters to match your testing scenario:
 
-#[contractimpl]
-impl GreetingContract {
-    /// Store a greeting on the ledger.
-    pub fn set_greeting(env: Env, greeting: String) {
-        env.storage()
-            .instance()
-            .set(&DataKey::Greeting, &greeting);
-        env.storage().instance().extend_ttl(50, 50);
-    }
+1. **Network Selection:** Choose the target network (e.g., Ethereum Mainnet, Polygon, or a local testnet).
+2. **Block Number:** Specify the starting block number for the simulation (default is latest).
+3. **Account Balance:** Set the starting balance for the contract deployer and any test accounts.
+4. **Environment Variables:** Configure any required environment variables (e.g., token addresses, oracle prices).
 
-    /// Read the stored greeting, defaulting to "Hello" if unset.
-    pub fn get_greeting(env: Env) -> String {
-        env.storage()
-            .instance()
-            .get(&DataKey::Greeting)
-            .unwrap_or(String::from_str(&env, "Hello"))
-    }
-}
-```
+> 🔗 **Deep-link:** [Open Simulation Config Panel](https://ide.stellarsuite.dev/?panel=simulation-config&mode=simulate)
 
-**Deep-link** — open the IDE with this source pre-filled:
+### Step 4: Deploying the Contract
 
-```
-stellar-suite://open?template=greeting-contract&network=testnet
-```
+With parameters set, deploy your contract to the simulated environment:
 
----
+1. Click the **Deploy** button in the Simulation panel.
+2. Review the deployment transaction details in the preview modal.
+3. Confirm deployment by clicking **Confirm Deploy**.
 
-## Step 3 — Build and Deploy to Testnet
+The IDE will simulate the deployment transaction and display:
+- Transaction hash
+- Gas used
+- Contract address
+- Any events emitted during deployment
 
-### 3a. Build the Contract
+> 🔗 **Deep-link:** [Simulate Contract Deployment](https://ide.stellarsuite.dev/?action=deploy&mode=simulate)
 
-Press `Ctrl+Shift+B` (macOS: `Cmd+Shift+B`) or click the **Build** button in the toolbar.
+### Step 5: Interacting with Deployed Contracts
 
-The terminal panel shows the compilation log. A successful build ends with:
+After deployment, you can interact with your contract's functions:
 
-```
-Compiling greeting_contract v0.1.0
-Finished release [optimized] target(s) in 4.23s
-WASM binary: target/wasm32-unknown-unknown/release/greeting_contract.wasm (3.2 KB)
-```
+1. In the **Contract Interactions** section, select the deployed contract from the dropdown.
+2. Choose a function to call (e.g., `mint`, `transfer`, `balanceOf`).
+3. Enter the required parameters for the function call.
+4. Click **Call** to execute the function in the simulated environment.
 
-### 3b. Fund a Testnet Account
+The simulation will show:
+- Return values
+- Gas used
+- State changes
+- Events emitted
 
-Click **Fund Account** in the sidebar to request testnet XLM from Friendbot. The IDE auto-detects your Freighter wallet address. If you are not connected to Freighter, you can paste any testnet public key.
+> 🔗 **Deep-link:** [Simulate Function Call](https://ide.stellarsuite.dev/?action=call&function=mint&mode=simulate)
 
-### 3c. Deploy
+### Step 6: Advanced Simulation Features
 
-Click **Deploy Contract** → **Testnet**. The IDE uploads the WASM binary and returns a 56-character contract ID starting with `C`. Copy and save this ID — you will need it in the next step.
+Explore these advanced features to thoroughly test your contract:
 
-Example contract ID: `CAAQYG...XJKZ` (56 chars)
+- **Forking Mainnet:** Simulate against real-world state by forking a live network.
+  > 🔗 [Fork Mainnet Simulation](https://ide.stellarsuite.dev/?fork=mainnet&mode=simulate)
+  
+- **Debugging:** Step through transactions with the built-in debugger.
+  > 🔗 [Open Debugger](https://ide.stellarsuite.dev/?panel=debugger&mode=simulate)
+  
+- **Gas Profiling:** Analyze gas usage for optimization.
+  > 🔗 [Gas Profiler](https://ide.stellarsuite.dev/?panel=gas-profiler&mode=simulate)
+  
+- **Event Monitoring:** Listen for and inspect contract events in real-time.
+  > 🔗 [Event Monitor](https://ide.stellarsuite.dev/?panel=event-monitor&mode=simulate)
 
----
+### Step 7: Analyzing Results
 
-## Step 4 — Run Your First Simulation
+After running simulations, analyze the results to ensure contract correctness:
 
-With the contract deployed you are ready to simulate a call.
+1. Review the **Transaction Log** for all executed transactions.
+2. Check the **State Diff** to see how contract storage changed.
+3. Examine **Event Logs** for emitted events.
+4. Use the **Coverage Report** to see which lines of code were executed during simulation.
 
-1. Open the **Simulation** panel from the sidebar (rocket icon, or `Ctrl+Alt+S`).
-2. Paste your contract ID into the **Contract ID** field.
-3. The IDE fetches the contract ABI and lists available functions: `set_greeting` and `get_greeting`.
-4. Click **get_greeting**.
-5. No parameters are required. Click **Simulate**.
+> 🔗 **Deep-link:** [View Simulation Report](https://ide.stellarsuite.dev/?panel=report&mode=simulate)
 
-The panel shows the result almost instantly (usually < 500 ms over testnet RPC):
+## Conclusion and Next Steps
 
-```json
-{
-  "result": "Hello",
-  "fee_estimate": {
-    "inclusion_fee": "100 stroops",
-    "resource_fee": "220 stroops"
-  },
-  "resources": {
-    "cpu_instructions": 521340,
-    "mem_bytes": 1048576,
-    "read_bytes": 128,
-    "write_bytes": 0
-  }
-}
-```
+Congratulations! You've completed the interactive simulation walkthrough. You now know how to:
 
-**Deep-link** — open the IDE with the Simulation panel focused on a pre-filled contract:
+- Set up and configure simulation environments
+- Load and deploy smart contracts
+- Interact with deployed contracts
+- Utilize advanced simulation features
+- Analyze simulation results
 
-```
-stellar-suite://simulate?contractId=CAAQYG...XJKZ&function=get_greeting&network=testnet
-```
+### Next Steps
 
----
+To further enhance your simulation experience:
 
-## Step 5 — Inspect Simulation Results
+- **Integrate with CI/CD:** Add simulation tests to your continuous integration pipeline.
+- **Create Test Suites:** Save simulation configurations as reusable test scenarios.
+- **Team Collaboration:** Share simulation sessions with teammates via shareable links.
+- **Explore Templates:** Check out the [Simulation Templates Library](https://ide.stellarsuite.dev/templates) for common testing patterns.
 
-The **Results** tab has three sub-sections.
+> 🚀 **Ready to simulate your own contract?** [Open IDE with Empty Simulation](https://ide.stellarsuite.dev/?mode=simulate)
 
-### Return Value
-
-The return value is decoded from XDR automatically. For scalar types (strings, integers, booleans) the IDE shows the native value. For complex types (maps, vecs, structs) it shows an expandable tree view.
-
-### Fee Breakdown
-
-| Field | Meaning |
-|---|---|
-| `inclusion_fee` | Base fee to get the transaction included in a ledger |
-| `resource_fee` | Fee proportional to CPU, memory, and storage footprint |
-| `total_fee` | `inclusion_fee + resource_fee` |
-
-### Error Panel
-
-If the call panics or returns an error code, the **Error** tab activates and shows:
-
-- The Soroban error code (e.g., `Error(Contract, #1)`)
-- The Rust panic message (when `contractpanic` metadata is present)
-- Suggested fixes based on common error patterns
-
----
-
-## Step 6 — Use the State Diff Viewer
-
-The state diff viewer shows which ledger entries a simulated invocation **reads** and **writes** without committing anything on-chain.
-
-1. Simulate `set_greeting` with the argument `"World"`.
-2. In the result panel, click the **State Diff** tab.
-
-You will see something like:
-
-```
-MODIFIED  CONTRACT_INSTANCE  CAAQYG...XJKZ
-  Greeting: "Hello" → "World"
-```
-
-Entries are colour-coded:
-
-- **Green (CREATED)** — a new ledger entry would be written.
-- **Yellow (MODIFIED)** — an existing entry would change.
-- **Red (DELETED)** — an existing entry would be removed.
-- **Blue (READ)** — an existing entry was accessed but not changed.
-
-**Deep-link** — open the state diff view for a pre-configured simulation:
-
-```
-stellar-suite://simulate?contractId=CAAQYG...XJKZ&function=set_greeting&args=World&network=testnet&view=diff
-```
-
----
-
-## Step 7 — Profile Resource Usage
-
-Click the **Resources** tab to open the profiler.
-
-The profiler displays a bar chart of the five resource dimensions:
-
-| Resource | Testnet Limit | Your Usage |
-|---|---|---|
-| CPU instructions | 100 000 000 | shown per call |
-| Memory bytes | 40 MB | shown per call |
-| Ledger read bytes | 200 KB | shown per call |
-| Ledger write bytes | 65 KB | shown per call |
-| Ledger read entries | 40 | shown per call |
-
-Bars that exceed **80 %** of the limit turn amber. Bars that exceed **95 %** turn red.
-
-### Comparing Multiple Calls
-
-Use the **Add to Compare** button to pin a simulation result. Pin several calls and the profiler overlays them side-by-side, making it easy to spot regressions between contract versions.
-
----
-
-## Step 8 — Export and Share Simulation Results
-
-Click the **Export** button (download icon) in the simulation panel to save a JSON file containing:
-
-```json
-{
-  "contractId": "CAAQYG...XJKZ",
-  "network": "testnet",
-  "function": "set_greeting",
-  "args": ["World"],
-  "result": null,
-  "state_changes": [ ... ],
-  "resources": { ... },
-  "timestamp": "2025-06-01T12:00:00Z"
-}
-```
-
-You can re-import any exported file to replay the simulation later, even against a different network or contract version, by clicking **Import Simulation** in the panel menu.
-
-### Sharing via Deep-Link
-
-The IDE can encode a full simulation configuration into a shareable URL. Click **Share** → **Copy Link**. Anyone with the link and Stellar Suite installed can reproduce the exact simulation with one click.
-
----
-
-## Step 9 — Offline Simulation
-
-Stellar Suite supports **offline simulation** using a bundled WASM execution engine. This is useful for:
-
-- Rapid iteration without waiting for RPC round-trips
-- Air-gapped or restricted network environments
-- CI/CD pipelines that run contract tests in the browser
-
-To enable offline simulation:
-
-1. Open **Settings** → **Simulation** → toggle **Use Local WASM Engine**.
-2. The IDE bundles `soroban-simulation.wasm` with each build; no download required.
-3. Re-run any previous simulation — the result panel shows `(offline)` in the header.
-
-> **Note:** Offline simulation does not reflect real ledger state. Ledger reads return mocked values. Use it for logic and arithmetic validation only; verify fee estimates on testnet before submitting.
-
----
-
-## Troubleshooting
-
-### "Contract not found" error
-
-- Verify the contract ID is 56 characters starting with `C`.
-- Check that the selected network (testnet / mainnet) matches where the contract was deployed.
-- Wait 5–10 seconds after deployment for the RPC node to index the new contract.
-
-### Simulation returns `HostError(WasmVm, InvalidAction)`
-
-The contract WASM was compiled for a different Soroban environment version than the RPC node supports. Rebuild with the latest `soroban-sdk` version and redeploy.
-
-### Fee estimate seems too high
-
-- Inspect the **Resources** tab to identify which dimension is driving the cost.
-- Large `write_bytes` values often indicate unnecessary storage writes or large data structures.
-- Large `cpu_instructions` values may point to unbounded loops or expensive host functions.
-
-### Deep-links do not open
-
-Ensure Stellar Suite is installed and registered as the handler for the `stellar-suite://` URI scheme. On macOS/Linux run:
-
-```bash
-stellar-suite --register-protocol
-```
-
-On Windows, the installer registers the protocol automatically.
-
----
-
-*For more information see the [Simulation Features reference](../simulation-features.md) and the [Soroban documentation](https://developers.stellar.org/docs/build/smart-contracts/overview).*
+Remember, thorough simulation reduces risks and builds confidence before mainnet deployment. Happy building!
