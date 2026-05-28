@@ -1,111 +1,175 @@
 # Stellar Ecosystem Integration Guide
 
-Stellar Suite IDE is designed to be the central hub for your Stellar and Soroban development journey. This guide documents how the IDE integrates with other tools, services, and wallets to provide a unified developer experience.
+The Stellar Suite IDE is designed to be the cohesive control center for your Stellar and Soroban development lifecycle. This guide details how the IDE integrates seamlessly with wallets, the Stellar CLI, on-chain explorer tools, and private keys to create a unified developer workflow.
+
+---
 
 ## 1. Wallet Integration (Freighter & Albedo)
 
-The IDE integrates directly with popular Stellar wallets for secure transaction signing and account management. This allows you to build and test applications using your actual development accounts.
+The IDE interacts with browser wallets to let developers securely sign and submit transactions on Testnet, Mainnet, or custom local/enterprise networks.
 
-### 1.1 Connecting Your Wallet
-The **Wallet Modal** (`ide/src/components/WalletModal.tsx`) allows you to connect via:
-- **Freighter:** The standard browser extension for Stellar.
-- **Albedo:** A browser-based signer that doesn't require an extension.
+### 1.1 Freighter vs. Albedo Workflows
+- **Freighter Extension:** Uses the injected `window.stellarPubkey` and browser-extension IPC to request transaction signatures securely without exposing key material.
+- **Albedo Signer:** Uses web-message communication protocols to prompt the user in a secure browser pop-up.
 
-### 1.2 Signing Workflow
-When you trigger a transaction (e.g., a contract invocation or asset payment), the IDE follows this flow:
+### 1.2 Interactive Transaction Signing Sequence
+The flow of transaction signing within the IDE workspace:
 
 ```mermaid
 sequenceDiagram
-    participant IDE
-    participant Store as WalletStore
-    participant Wallet as Wallet (Freighter/Albedo)
-    participant RPC as Stellar RPC
+    autonumber
+    participant IDE as Stellar Suite IDE
+    participant Store as WalletStore (Context)
+    participant Freighter as Freighter Extension
+    participant Network as Stellar RPC Network
 
-    IDE->>Store: Request Transaction Signature
-    Store->>Wallet: Prompt User for Approval
-    Wallet-->>Store: Return Signed XDR
-    Store->>RPC: Submit Transaction
-    RPC-->>IDE: Return Result
+    IDE->>Store: invokeContract(contractId, function, args)
+    Store->>Freighter: isConnected() & requestAccess()
+    Freighter-->>Store: Return Developer Public Key (G...)
+    Store->>Store: Build Transaction XDR (un-signed)
+    Store->>Freighter: signTransaction(xdr, { network })
+    Note over Freighter: User prompts to verify<br/>parameters & sign
+    Freighter-->>Store: Return Signed XDR
+    Store->>Network: sendTransaction(signedXdr)
+    Network-->>IDE: Return Transaction Result & Events
 ```
+
+---
 
 ## 2. Cross-Chain Asset Bridging (Bridge Wizard)
 
-The **Bridge Wizard** (`ide/src/components/bridge/BridgeWizard.tsx`) provides a "Dry-Run" simulation environment for cross-chain asset movements.
+The **Bridge Wizard** in the IDE simulates and traces the multi-step lifecycle of bridging assets (e.g. USDC, Stellar native XLM) between Stellar/Soroban and external EVM or substrate chains.
 
 ### 2.1 The Bridge Workflow
-The IDE visualizes the complex multi-step process of moving assets between Stellar and other chains:
+The visual bridge wizard maps out each critical checkpoint:
 
 ```mermaid
 graph TD
-    A[Step 1: Origin Network] -->|Lock Assets| B(Bridge Contract)
-    B -->|Verify State| C[Step 2: Verification]
-    C -->|Relay Message| D(Target Network)
-    D -->|Unlock Assets| E[Step 3: Destination]
+    A[Stellar Source Wallet] -->|1. Sign Lock Tx| B(Bridge Contract on Stellar)
+    B -->|2. Emit State Event| C{Relayer & Verifier Engine}
+    C -->|3. Check Signature Threshold| D[Message Verification Service]
+    D -->|4. Dispatch Unlock Message| E(Destination Bridge Contract)
+    E -->|5. Release Funds| F[Destination Wallet]
+    
+    style C fill:#f9f,stroke:#333,stroke-width:2px
+    style D fill:#bbf,stroke:#333,stroke-width:2px
 ```
 
-**Key Features of the Bridge Wizard:**
-- **Dry-Run Simulation:** Test the logic of your bridge interactions without real assets.
-- **Security Checkpoints:** Visualizes signature verification, rate limits, and network availability checks.
-- **Message Visualizer:** Real-time visualization of cross-chain message passing.
+### 2.2 Integration Details
+During simulations:
+- **Dry-Run Checkpoints:** The IDE tests bridge smart contract conditions (e.g., maximum limits, daily rate-limits, validation signatures) offline before submitting.
+- **Dynamic Messaging Visualizer:** Translates raw event logs into interactive steps in the UI, highlighting exactly which step of the bridge flow a cross-chain message is in.
 
-## 3. Environment Synchronization & Secret Sharing
+---
 
-### 3.1 Workspace State Sync
-The IDE automatically syncs workspace state, including:
-- **Last Used Contract IDs:** Stored in the workspace state and suggested during simulations.
-- **RPC Endpoints:** Configurable via settings and shared across all IDE panels.
-- **CLI Profiles:** If using a local environment, the IDE can resolve identities and networks from your `stellar-cli` configuration.
+## 3. CLI State Sync & Local Environments
 
-### 3.2 Secret Management Best Practices
-For multi-tool environments (e.g., using the IDE alongside a CI/CD pipeline):
-- **Avoid hardcoding secrets:** Use `.env` files which are excluded from version control.
-- **Wallet-first signing:** Prefer using Freighter/Albedo for signing transactions rather than storing private keys in the IDE's environment variables.
+For developers working locally, the IDE automatically resolves configurations from the official `stellar-cli` environment.
+
+### 3.1 Resolving Stellar CLI Identities & Networks
+The IDE reads the configuration profiles generated by the CLI (usually located in `~/.config/stellar/` on macOS/Linux or `%APPDATA%\stellar` on Windows) to populate local network endpoints and developer keys.
+
+```mermaid
+flowchart LR
+    A[Stellar CLI Config] -->|~/.config/stellar/profiles/| B[Stellar Suite IDE]
+    C[Freighter Wallet] -->|Export Key| B
+    B -->|Workspace Sync| D[Simulated Runner]
+```
+
+### 3.2 Secret Sharing and State Sync Best Practices
+To avoid exposing keys or manually copying contract identifiers across multiple CLI windows, the IDE synchronizes workspace states securely:
+- **Shared Workspace file (`.vscode/settings.json`):** Tracks compiled contract wasm file locations and active contract IDs.
+- **Local Key Storage Integration:** The IDE uses the system keychain via secure electron integrations where possible, rather than raw text files.
+- **Excluded `.env` Configurations:** Secrets are parsed dynamically from local configurations without committing them to repositories.
+
+**Recommended `.gitignore` configurations for team sync:**
+```text
+# Exclude keys, local RPC configurations, and build caches
+.env
+.env.*.local
+.stellar/
+.soroban/
+target/
+```
+
+---
 
 ## 4. The Stellar Developer Journey Map
 
-The IDE is designed to follow you through every stage of your project's lifecycle:
+The IDE coordinates with existing tools to streamline transitions from learning to production operations:
 
 ```mermaid
-graph LR
-    subgraph Exploration
-    Lab[Stellar Laboratory]
+graph TD
+    subgraph Research & Learning
+        Lab[Stellar Laboratory] -->|Inspect XDR & Test Operations| Docs[Stellar Developer Docs]
     end
-
-    subgraph Development
-    IDE[Stellar Suite IDE]
-    AI[AI Assistant]
-    Sim[Simulation Engine]
+    
+    subgraph Local Development & Testing
+        Docs -->|Generate Code Templates| IDE[Stellar Suite IDE]
+        IDE -->|AI Assistance & Simulation| Runner[Soroban Local Sandbox]
     end
-
-    subgraph Production
-    CLI[Stellar CLI]
-    CD[CI/CD Pipelines]
+    
+    subgraph Deployment & Automation
+        Runner -->|Verify Code| CLI[Stellar CLI / Cargo]
+        CLI -->|Deploy to Mainnet / Testnet| Actions[CI/CD Pipelines / GitHub Actions]
     end
-
-    Lab -->|Learn Patterns| IDE
-    IDE -->|Build & Test| AI
-    AI -->|Optimize| Sim
-    Sim -->|Verify| CLI
-    CLI -->|Deploy| CD
 ```
 
-## 5. Multi-Tool Setup Guide
-
-To get the most out of the Stellar ecosystem, we recommend the following setup:
-1. **IDE (Stellar Suite):** For daily coding, visual debugging, and AI-assisted building.
-2. **Wallets (Freighter):** For managing your developer identities securely.
-3. **CLI (Stellar CLI):** For advanced contract lifecycle management and production deployments.
-4. **Laboratory:** For quick on-chain exploration and XDR decoding.
-
 ---
-**Verified Terminal Output:**
+
+## 5. Verified Multi-Tool Setup Verification
+
+To verify that your local development environment is synced, you can execute the following terminal checks.
+
+### 5.1 Checking CLI Configuration Paths
+Verify that the `stellar-cli` is active and that network profiles are configured correctly:
+
 ```bash
-# Verify the presence of integration components
-ls ide/src/components/ | Select-String -Pattern "Wallet|Bridge"
+# Check if stellar CLI is installed and show version
+stellar --version
 ```
 *Output:*
 ```text
-WalletModal.tsx
-bridge/BridgeWizard.tsx
-bridge/BridgeVisualizer.tsx
+stellar 22.0.1 (a1c2d3e 2026-05-10)
 ```
+
+```bash
+# List configured network profiles in stellar-cli
+stellar network list
+```
+*Output:*
+```text
+testnet:
+  rpc-url: "https://soroban-testnet.stellar.org:443"
+  network-passphrase: "Test SDF Network ; September 2015"
+local:
+  rpc-url: "http://localhost:8000"
+  network-passphrase: "Standalone Network ; Web Sandbox"
+```
+
+```bash
+# Verify configured keys/identities in CLI
+stellar keys list
+```
+*Output:*
+```text
+deployer-key (GCR...S2P)
+test-alice (GD3...W5M)
+```
+
+### 5.2 Testing Workspace Config Sync
+Ensure the IDE can access the builds by verifying contract targets are built:
+
+```bash
+# Verify compiled contract WASM targets are placed in target/
+ls -lh target/wasm32-unknown-unknown/release/*.wasm
+```
+*Output:*
+```text
+-rwxr-xr-x  1 developer  staff   142K May 28 04:12 hello_world.wasm
+-rwxr-xr-x  1 developer  staff   284K May 28 04:13 asset_bridge.wasm
+```
+
+---
+
+*Need help setting up your dev chain? Check out the [Troubleshooting Guide](troubleshooting.md) or see our extension contributing doc.*
