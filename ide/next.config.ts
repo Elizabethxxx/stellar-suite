@@ -22,6 +22,11 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
+  // swcMinify and optimizeCss are enabled by default in Next.js 15+
+  // swcMinify is no longer a top-level option in Next.js 15
+  compress: true,
+  poweredByHeader: false,
+  outputFileTracingRoot: __dirname,
   async headers() {
     return [
       {
@@ -47,39 +52,51 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  webpack: (config, { isServer }) => {
-    // Add filesystem caching for better performance
-    config.cache = {
-      type: 'filesystem',
-    };
+  webpack: (config, { dev, isServer }) => {
+    // Filesystem caching for improved build performance
+    if (!dev) {
+      config.cache = {
+        type: 'filesystem',
+        buildDependencies: {
+          config: [__filename],
+        },
+      };
+    }
+
+    // Deterministic module IDs prevent cache busting on unrelated changes
+    config.optimization.moduleIds = 'deterministic';
+    // Single runtime chunk reduces duplication
+    config.optimization.runtimeChunk = 'single';
 
     // Aggressive code splitting for client-side only
-    if (!isServer) {
-      config.optimization = {
-        ...config.optimization,
-        splitChunks: {
-          chunks: 'all',
-          // Let webpack name chunks automatically
-          cacheGroups: {
-            // Default cacheGroups
-            default: false,
-            // Vendor chunk for libraries in node_modules
-            vendor: {
-              test: /[\\/]node_modules[\\/]/,
-              name: 'vendor',
-              priority: 20,
-              chunks: 'all',
-              enforce: true,
-              reuseExistingChunk: true,
+    if (!dev && !isServer) {
+      config.optimization.splitChunks = {
+        chunks: 'all',
+        minSize: 20000,
+        maxSize: 244000,
+        minChunks: 1,
+        cacheGroups: {
+          framework: {
+            name: 'framework',
+            test: /[\\/]node_modules[\\/](react|react-dom|scheduler|next)[\\/]/,
+            priority: 40,
+            enforce: true,
+          },
+          commons: {
+            name: 'commons',
+            minChunks: 2,
+            priority: 20,
+            reuseExistingChunk: true,
+          },
+          lib: {
+            test: /[\\/]node_modules[\\/]/,
+            name(module) {
+              const match = module.context.match(/[\\/]node_modules[\\/](.*?)([\\/]|$)/);
+              return `npm.${match[1].replace('@', '')}`;
             },
-            // Common chunk for shared modules
-            common: {
-              name: 'common',
-              minChunks: 2,
-              priority: 10,
-              chunks: 'all',
-              reuseExistingChunk: true,
-            },
+            priority: 10,
+            minChunks: 2,
+            reuseExistingChunk: true,
           },
         },
       };
