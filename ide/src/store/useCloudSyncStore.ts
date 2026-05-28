@@ -61,6 +61,14 @@ interface CloudSyncState {
     openTabs?: TabInfo[],
     activeTabPath?: string[],
   ) => void;
+  /** Debounced 1-second sync triggered whenever the active tab state changes. */
+  scheduleTabSync: (
+    userId: string,
+    files: WorkspaceTextFile[],
+    network: string,
+    openTabs: TabInfo[],
+    activeTabPath: string[],
+  ) => void;
   loadFromCloud: (projectId: string) => Promise<ProjectData | null>;
   applyRemoteTabState: (openTabs: TabInfo[], activeTabPath: string[]) => void;
   resolveConflict: (choice: "local" | "cloud") => void;
