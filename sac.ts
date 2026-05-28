@@ -20,3 +20,7 @@ export interface SACInteractionState {
     type: 'wrap' | 'unwrap';
   };
 }
+
+export interface SACState {
+  interactions: SACInteractionState[];
+} 
