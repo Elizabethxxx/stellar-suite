@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawnSync } from "child_process";
 import { withCorsProtection } from "../_lib/corsMiddleware";
+import { csrfGuard } from "@/lib/csrf";
 
 async function handleFormatRequest(req: NextRequest): Promise<NextResponse> {
+  const csrfError = csrfGuard(req);
+  if (csrfError) return csrfError;
+
   try {
     const { code } = await req.json();
 

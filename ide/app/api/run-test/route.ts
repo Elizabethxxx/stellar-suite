@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { withCorsProtection } from "../_lib/corsMiddleware";
+import { csrfGuard } from "@/lib/csrf";
 
 const execAsync = promisify(exec);
 
 async function handleRunTestRequest(req: NextRequest): Promise<NextResponse> {
+  const csrfError = csrfGuard(req);
+  if (csrfError) return csrfError;
+
   let testName: string;
   let filePath: string;
 

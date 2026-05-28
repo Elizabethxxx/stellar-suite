@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/authOptions";
 import { supabase } from "@/lib/cloud/supabaseClient";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { csrfGuard } from "@/lib/csrf";
 
 const DB_PATH = path.join(process.cwd(), "projects-db.json");
 
@@ -22,6 +23,9 @@ async function writeLocalDb(data: any) {
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const csrfError = csrfGuard(request);
+  if (csrfError) return csrfError;
+
   const session = await getServerSession(authOptions);
   const userId = session?.user?.id || "dev-user-123";
 

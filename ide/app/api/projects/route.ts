@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/authOptions";
 import { supabase } from "@/lib/cloud/supabaseClient";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { csrfGuard } from "@/lib/csrf";
 
 const DB_PATH = path.join(process.cwd(), "projects-db.json");
 
@@ -68,6 +69,9 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const csrfError = csrfGuard(request);
+  if (csrfError) return csrfError;
+
   const session = await getServerSession(authOptions);
   const userId = session?.user?.id || "dev-user-123";
 

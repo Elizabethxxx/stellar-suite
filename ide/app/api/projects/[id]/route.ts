@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/authOptions";
 import { supabase } from "@/lib/cloud/supabaseClient";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { csrfGuard } from "@/lib/csrf";
 
 const DB_PATH = path.join(process.cwd(), "projects-db.json");
 
@@ -72,6 +73,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const csrfError = csrfGuard(request);
+  if (csrfError) return csrfError;
+
   const session = await getServerSession(authOptions);
   const userId = session?.user?.id || "dev-user-123";
 
@@ -87,7 +91,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
   if (supabase) {
     try {
-      // 1. Fetch current to check conflict
       const { data: current, error: getErr } = await supabase
         .from("projects")
         .select("*")
@@ -99,12 +102,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         return NextResponse.json({ error: "Project not found" }, { status: 404 });
       }
 
-      // Conflict validation (409)
       if (lastKnownUpdatedAt && current.updated_at !== lastKnownUpdatedAt) {
         return NextResponse.json({ cloudData: current }, { status: 409 });
       }
 
-      // 2. Perform update
       const { error: updateErr } = await supabase
         .from("projects")
         .update({
@@ -133,7 +134,6 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     const current = db[idx];
 
-    // Conflict validation
     if (lastKnownUpdatedAt && current.updated_at !== lastKnownUpdatedAt) {
       return NextResponse.json({ cloudData: current }, { status: 409 });
     }
@@ -155,6 +155,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const csrfError = csrfGuard(request);
+  if (csrfError) return csrfError;
+
   const session = await getServerSession(authOptions);
   const userId = session?.user?.id || "dev-user-123";
   const permanent = request.nextUrl.searchParams.get("permanent") === "true";

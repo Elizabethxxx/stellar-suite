@@ -6,10 +6,14 @@ import {
   type RustWorkspacePayload,
 } from "../_lib/rustTooling";
 import { withCorsProtection } from "../_lib/corsMiddleware";
+import { csrfGuard } from "@/lib/csrf";
 
 export const runtime = "nodejs";
 
 async function handleClippyRequest(request: NextRequest): Promise<NextResponse> {
+  const csrfError = csrfGuard(request);
+  if (csrfError) return csrfError;
+
   let payload: RustWorkspacePayload;
 
   try {

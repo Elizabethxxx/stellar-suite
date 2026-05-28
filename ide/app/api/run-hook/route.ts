@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { spawn } from "node:child_process";
 import { withCorsProtection } from "../_lib/corsMiddleware";
+import { csrfGuard } from "@/lib/csrf";
 
 interface RunHookRequest {
   command: string;
@@ -51,6 +52,9 @@ function runShellCommand(command: string): Promise<RunHookResponse> {
 }
 
 async function handleRunHookRequest(req: NextRequest): Promise<NextResponse> {
+  const csrfError = csrfGuard(req);
+  if (csrfError) return csrfError;
+
   let body: RunHookRequest;
 
   try {

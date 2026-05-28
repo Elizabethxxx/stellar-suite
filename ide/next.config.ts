@@ -4,15 +4,10 @@ const cspHeader = `
   default-src 'self';
   script-src 'self' 'unsafe-eval' 'unsafe-inline';
   style-src 'self' 'unsafe-inline';
-  img-src 'self' blob: data:;
-  font-src 'self' data:;
-  worker-src 'self' blob:;
-  connect-src 'self' https: wss:;
-  object-src 'none';
-  base-uri 'self';
-  form-action 'self';
+  img-src 'self' data: blob:;
+  font-src 'self';
+  connect-src 'self';
   frame-ancestors 'none';
-  upgrade-insecure-requests;
 `.replace(/\s{2,}/g, ' ').trim();
 
 const nextConfig: NextConfig = {
@@ -22,12 +17,11 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // swcMinify and optimizeCss are enabled by default in Next.js 15+
-  // swcMinify is no longer a top-level option in Next.js 15
   compress: true,
   poweredByHeader: false,
   outputFileTracingRoot: __dirname,
   async headers() {
+    // #794 CSRF security headers
     return [
       {
         source: '/(.*)',
@@ -36,18 +30,19 @@ const nextConfig: NextConfig = {
             key: 'Content-Security-Policy',
             value: cspHeader,
           },
-          {
-            key: 'X-Frame-Options',
-            value: 'DENY',
-          },
-          {
-            key: 'X-Content-Type-Options',
-            value: 'nosniff',
-          },
-          {
-            key: 'Referrer-Policy',
-            value: 'strict-origin-when-cross-origin',
-          },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          { key: 'X-DNS-Prefetch-Control', value: 'on' },
+          { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+        ],
+      },
+      {
+        source: '/api/(.*)',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store, no-cache, must-revalidate' },
+          { key: 'Pragma', value: 'no-cache' },
         ],
       },
     ];
