@@ -48,10 +48,22 @@ export function useOfflineStatus(): OfflineStatus {
       setIsOffline(false);
       setSyncState("syncing");
       // Trigger background sync if SW supports it
-      if ("serviceWorker" in navigator && "SyncManager" in window) {
-        navigator.serviceWorker.ready
-          .then((reg) => (reg as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register("stellar-ide-sync"))
-          .catch(() => {/* sync not available, SW flushes on its own */});
+      if ("serviceWorker" in navigator) {
+        if ("SyncManager" in window) {
+          navigator.serviceWorker.ready
+            .then((reg) => (reg as ServiceWorkerRegistration & { sync: { register: (tag: string) => Promise<void> } }).sync.register("stellar-ide-sync"))
+            .catch(() => {
+              // fallback if registration failed
+              navigator.serviceWorker.ready.then((reg) => {
+                reg.active?.postMessage({ type: "REQUEST_SYNC" });
+              });
+            });
+        } else {
+          // Fallback: send message to SW to trigger manual sync
+          navigator.serviceWorker.ready.then((reg) => {
+            reg.active?.postMessage({ type: "REQUEST_SYNC" });
+          }).catch(() => {});
+        }
       }
     };
 
@@ -85,6 +97,10 @@ export function useOfflineStatus(): OfflineStatus {
       // Ask the SW for the current queue length on mount
       navigator.serviceWorker.ready.then((reg) => {
         reg.active?.postMessage({ type: "GET_QUEUE_LENGTH" });
+        // Trigger manual sync on mount if online
+        if (navigator.onLine) {
+          reg.active?.postMessage({ type: "REQUEST_SYNC" });
+        }
       }).catch(() => {});
     }
 

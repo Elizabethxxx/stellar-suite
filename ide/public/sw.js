@@ -347,4 +347,8 @@ self.addEventListener("message", (event) => {
       event.source?.postMessage({ type: "OFFLINE_QUEUE_UPDATE", count });
     });
   }
+
+  if (event.data && event.data.type === "REQUEST_SYNC") {
+    event.waitUntil(flushQueue());
+  }
 });
