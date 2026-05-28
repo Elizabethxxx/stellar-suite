@@ -43,6 +43,14 @@ export interface InstantiateContractOptions {
   pollIntervalMs?: number;
   pollTimeoutMs?: number;
   onStatus?: (status: TransactionExecutionStatus) => void;
+  /**
+   * Called after simulation/assembly with the base64 transaction-envelope
+   * XDR that is about to be signed. The caller should decode the XDR,
+   * show it to the user, and resolve with `true` to proceed with signing
+   * or `false` to abort. If omitted, the transaction is signed without
+   * a pre-signing review.
+   */
+  onConfirmXdr?: (xdr: string) => Promise<boolean>;
 }
 
 export interface InstantiateContractResult {
@@ -132,6 +140,7 @@ export const instantiateContract = async ({
   pollIntervalMs = DEFAULT_TRANSACTION_POLL_INTERVAL_MS,
   pollTimeoutMs = DEFAULT_TRANSACTION_POLL_TIMEOUT_MS,
   onStatus,
+  onConfirmXdr,
 }: InstantiateContractOptions): Promise<InstantiateContractResult> => {
   const publicKey = getPublicKey(activeContext, activeIdentity, webWalletPublicKey);
   const allowHttp = getAllowHttp(rpcUrl);
@@ -184,6 +193,19 @@ export const instantiateContract = async ({
 
   // Assemble the transaction with the simulated footprint
   const assembledTx = Api.assembleTransaction(tx, simResponse).build();
+
+  // Pre-signing review: surface the decoded XDR so the user can verify
+  // operations, fees, and authorization changes before approving.
+  if (onConfirmXdr) {
+    onStatus?.({
+      phase: "preparing",
+      message: "Awaiting XDR review before signing…",
+    });
+    const approved = await onConfirmXdr(assembledTx.toXDR());
+    if (!approved) {
+      throw new Error("Transaction signing was cancelled after XDR review.");
+    }
+  }
 
   // Sign
   onStatus?.({ phase: "signing", message: "Waiting for signature…" });

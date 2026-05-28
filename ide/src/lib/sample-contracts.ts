@@ -1136,6 +1136,448 @@ soroban-sdk = { workspace = true, features = ["testutils"] }
       },
     ],
   },
+  // ── DAO Governance Voting ─────────────────────────────────────────────────
+  {
+    name: "dao_voting",
+    type: "folder",
+    children: [
+      {
+        name: "lib.rs",
+        type: "file",
+        language: "rust",
+        content: `#![no_std]
+
+//! DAO Governance Voting — minimal proposal + voting reference example.
+//!
+//! Showcases:
+//!   * One-time admin initialisation
+//!   * Admin-only proposal creation with a deadline (unix-seconds)
+//!   * One-vote-per-voter enforcement via HasVoted(proposal_id, voter)
+//!   * Yes / No / Abstain tallies stored on the proposal record itself
+//!   * Explicit \`require_auth\` on every state-changing call
+//!
+//! Security notes:
+//!   * Voters must sign — \`voter.require_auth()\` is the only guard against
+//!     ballot-stuffing by a third party.
+//!   * Deadline is checked with strict \`<\` so a vote arriving exactly at the
+//!     deadline is rejected.
+//!   * Once finalised, no further votes are accepted even before the deadline.
+//!   * Proposal records live in persistent storage with TTL extensions so
+//!     post-vote results stay queryable.
+
+use soroban_sdk::{
+    contract, contracterror, contractimpl, contracttype, symbol_short,
+    Address, Env, String,
+};
+
+const PROPOSAL_TTL_LEDGERS: u32 = 200_000; // ~12 days at 5s ledgers
+
+#[contracttype]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Vote {
+    Yes,
+    No,
+    Abstain,
+}
+
+#[contracttype]
+#[derive(Clone, Debug)]
+pub struct Proposal {
+    pub id: u32,
+    pub title: String,
+    pub proposer: Address,
+    pub voting_ends_at: u64,
+    pub yes_count: u32,
+    pub no_count: u32,
+    pub abstain_count: u32,
+    pub finalized: bool,
+}
+
+#[contracttype]
+pub enum DataKey {
+    Admin,
+    NextProposalId,
+    Proposal(u32),
+    HasVoted(u32, Address),
+}
+
+#[contracterror]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[repr(u32)]
+pub enum DaoError {
+    NotInitialized = 1,
+    AlreadyInitialized = 2,
+    NotAdmin = 3,
+    ProposalNotFound = 4,
+    VotingClosed = 5,
+    AlreadyVoted = 6,
+    VotingStillOpen = 7,
+    AlreadyFinalized = 8,
+}
+
+#[contract]
+pub struct DaoVotingContract;
+
+#[contractimpl]
+impl DaoVotingContract {
+    /// One-time setup. Stores the DAO admin and seeds the proposal counter.
+    pub fn initialize(env: Env, admin: Address) -> Result<(), DaoError> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(DaoError::AlreadyInitialized);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::NextProposalId, &0u32);
+        Ok(())
+    }
+
+    /// Admin-only. Creates a proposal with a voting window of \`duration_secs\`
+    /// seconds from the current ledger close timestamp. Returns the id.
+    pub fn create_proposal(
+        env: Env,
+        proposer: Address,
+        title: String,
+        duration_secs: u64,
+    ) -> Result<u32, DaoError> {
+        proposer.require_auth();
+
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(DaoError::NotInitialized)?;
+        if proposer != admin {
+            return Err(DaoError::NotAdmin);
+        }
+
+        let id: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::NextProposalId)
+            .unwrap_or(0);
+        let now = env.ledger().timestamp();
+
+        let proposal = Proposal {
+            id,
+            title,
+            proposer: proposer.clone(),
+            voting_ends_at: now + duration_secs,
+            yes_count: 0,
+            no_count: 0,
+            abstain_count: 0,
+            finalized: false,
+        };
+        env.storage().persistent().set(&DataKey::Proposal(id), &proposal);
+        env.storage().persistent().extend_ttl(
+            &DataKey::Proposal(id),
+            PROPOSAL_TTL_LEDGERS,
+            PROPOSAL_TTL_LEDGERS,
+        );
+
+        env.storage()
+            .instance()
+            .set(&DataKey::NextProposalId, &(id + 1));
+
+        env.events()
+            .publish((symbol_short!("created"), id), proposer);
+        Ok(id)
+    }
+
+    /// One vote per (proposal, voter). Rejected once the deadline passes or
+    /// the proposal is finalised. Requires the voter's signature.
+    pub fn vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u32,
+        choice: Vote,
+    ) -> Result<(), DaoError> {
+        voter.require_auth();
+
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(DaoError::ProposalNotFound)?;
+
+        if proposal.finalized {
+            return Err(DaoError::AlreadyFinalized);
+        }
+        if env.ledger().timestamp() >= proposal.voting_ends_at {
+            return Err(DaoError::VotingClosed);
+        }
+
+        let voted_key = DataKey::HasVoted(proposal_id, voter.clone());
+        let already_voted: bool = env
+            .storage()
+            .persistent()
+            .get(&voted_key)
+            .unwrap_or(false);
+        if already_voted {
+            return Err(DaoError::AlreadyVoted);
+        }
+
+        match choice {
+            Vote::Yes => proposal.yes_count += 1,
+            Vote::No => proposal.no_count += 1,
+            Vote::Abstain => proposal.abstain_count += 1,
+        }
+
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+        env.storage().persistent().set(&voted_key, &true);
+        env.storage().persistent().extend_ttl(
+            &voted_key,
+            PROPOSAL_TTL_LEDGERS,
+            PROPOSAL_TTL_LEDGERS,
+        );
+
+        env.events()
+            .publish((symbol_short!("voted"), proposal_id), voter);
+        Ok(())
+    }
+
+    /// Returns the proposal record (including current tallies).
+    pub fn get_proposal(env: Env, proposal_id: u32) -> Result<Proposal, DaoError> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(DaoError::ProposalNotFound)
+    }
+
+    /// Number of proposals created so far (also the next id to be assigned).
+    pub fn proposal_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&DataKey::NextProposalId)
+            .unwrap_or(0)
+    }
+
+    /// Locks the tallies once the voting window has closed. Anyone may call;
+    /// idempotent up to "already finalised".
+    pub fn finalize(env: Env, proposal_id: u32) -> Result<(), DaoError> {
+        let mut proposal: Proposal = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Proposal(proposal_id))
+            .ok_or(DaoError::ProposalNotFound)?;
+
+        if proposal.finalized {
+            return Err(DaoError::AlreadyFinalized);
+        }
+        if env.ledger().timestamp() < proposal.voting_ends_at {
+            return Err(DaoError::VotingStillOpen);
+        }
+
+        proposal.finalized = true;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Proposal(proposal_id), &proposal);
+
+        env.events()
+            .publish((symbol_short!("final"), proposal_id), proposal.proposer.clone());
+        Ok(())
+    }
+}
+
+mod test;`,
+      },
+      {
+        name: "test.rs",
+        type: "file",
+        language: "rust",
+        content: `#![cfg(test)]
+
+use super::*;
+use soroban_sdk::testutils::{Address as _, Ledger as _};
+use soroban_sdk::{Env, String};
+
+fn setup(env: &Env) -> (DaoVotingContractClient<'static>, Address) {
+    let admin = Address::generate(env);
+    let contract_id = env.register_contract(None, DaoVotingContract);
+    let client = DaoVotingContractClient::new(env, &contract_id);
+    env.mock_all_auths();
+    client.initialize(&admin);
+    (client, admin)
+}
+
+#[test]
+fn initialize_is_one_shot() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (client, admin) = setup(&env);
+    let second = client.try_initialize(&admin);
+    assert!(second.is_err(), "re-initialize must error");
+}
+
+#[test]
+fn create_and_vote_tallies_correctly() {
+    let env = Env::default();
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+
+    let (client, admin) = setup(&env);
+    let pid = client.create_proposal(
+        &admin,
+        &String::from_str(&env, "Adopt SEP-41"),
+        &3_600,
+    );
+
+    let voter1 = Address::generate(&env);
+    let voter2 = Address::generate(&env);
+    let voter3 = Address::generate(&env);
+
+    client.vote(&voter1, &pid, &Vote::Yes);
+    client.vote(&voter2, &pid, &Vote::Yes);
+    client.vote(&voter3, &pid, &Vote::No);
+
+    let p = client.get_proposal(&pid);
+    assert_eq!(p.yes_count, 2);
+    assert_eq!(p.no_count, 1);
+    assert_eq!(p.abstain_count, 0);
+}
+
+#[test]
+fn voter_cannot_vote_twice() {
+    let env = Env::default();
+    env.ledger().with_mut(|l| l.timestamp = 1_000);
+    let (client, admin) = setup(&env);
+    let pid = client.create_proposal(&admin, &String::from_str(&env, "X"), &600);
+
+    let voter = Address::generate(&env);
+    client.vote(&voter, &pid, &Vote::Yes);
+
+    let second = client.try_vote(&voter, &pid, &Vote::No);
+    assert!(second.is_err(), "double vote must error");
+
+    let p = client.get_proposal(&pid);
+    assert_eq!(p.yes_count, 1);
+    assert_eq!(p.no_count, 0);
+}
+
+#[test]
+fn non_admin_cannot_create_proposal() {
+    let env = Env::default();
+    let (client, _admin) = setup(&env);
+    let intruder = Address::generate(&env);
+    let result = client.try_create_proposal(
+        &intruder,
+        &String::from_str(&env, "Y"),
+        &600,
+    );
+    assert!(result.is_err(), "non-admin proposal must error");
+}
+
+#[test]
+fn voting_closes_after_deadline() {
+    let env = Env::default();
+    env.ledger().with_mut(|l| l.timestamp = 0);
+    let (client, admin) = setup(&env);
+    let pid = client.create_proposal(
+        &admin,
+        &String::from_str(&env, "Z"),
+        &100,
+    );
+
+    env.ledger().with_mut(|l| l.timestamp = 200);
+    let voter = Address::generate(&env);
+    let result = client.try_vote(&voter, &pid, &Vote::Yes);
+    assert!(result.is_err(), "post-deadline vote must error");
+}
+
+#[test]
+fn finalize_after_deadline_locks_tallies() {
+    let env = Env::default();
+    env.ledger().with_mut(|l| l.timestamp = 0);
+    let (client, admin) = setup(&env);
+    let pid = client.create_proposal(
+        &admin,
+        &String::from_str(&env, "Final test"),
+        &50,
+    );
+    let voter = Address::generate(&env);
+    client.vote(&voter, &pid, &Vote::Yes);
+
+    env.ledger().with_mut(|l| l.timestamp = 100);
+    client.finalize(&pid);
+
+    let p = client.get_proposal(&pid);
+    assert!(p.finalized);
+    assert_eq!(p.yes_count, 1);
+
+    let late = client.try_vote(&Address::generate(&env), &pid, &Vote::No);
+    assert!(late.is_err(), "voting after finalize must error");
+}
+
+#[test]
+fn finalize_before_deadline_errors() {
+    let env = Env::default();
+    env.ledger().with_mut(|l| l.timestamp = 0);
+    let (client, admin) = setup(&env);
+    let pid = client.create_proposal(
+        &admin,
+        &String::from_str(&env, "Open"),
+        &1_000,
+    );
+
+    let result = client.try_finalize(&pid);
+    assert!(result.is_err(), "early finalize must error");
+}
+
+#[test]
+fn proposal_count_reflects_creations() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+    assert_eq!(client.proposal_count(), 0);
+    client.create_proposal(&admin, &String::from_str(&env, "A"), &600);
+    client.create_proposal(&admin, &String::from_str(&env, "B"), &600);
+    assert_eq!(client.proposal_count(), 2);
+}
+
+#[test]
+fn three_choice_tally_counts_each_bucket() {
+    let env = Env::default();
+    env.ledger().with_mut(|l| l.timestamp = 0);
+    let (client, admin) = setup(&env);
+    let pid = client.create_proposal(
+        &admin,
+        &String::from_str(&env, "Three-way"),
+        &1_000,
+    );
+
+    for _ in 0..3 {
+        client.vote(&Address::generate(&env), &pid, &Vote::Yes);
+    }
+    for _ in 0..2 {
+        client.vote(&Address::generate(&env), &pid, &Vote::No);
+    }
+    client.vote(&Address::generate(&env), &pid, &Vote::Abstain);
+
+    let p = client.get_proposal(&pid);
+    assert_eq!(p.yes_count, 3);
+    assert_eq!(p.no_count, 2);
+    assert_eq!(p.abstain_count, 1);
+}`,
+      },
+      {
+        name: "Cargo.toml",
+        type: "file",
+        language: "toml",
+        content: `[package]
+name = "dao-voting"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+`,
+      },
+    ],
+  },
 ];
 
 export function findFile(nodes: FileNode[], path: string[]): FileNode | null {

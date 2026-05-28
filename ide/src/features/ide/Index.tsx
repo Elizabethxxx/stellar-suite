@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { contract } from "@stellar/stellar-sdk";
 import { Api, Server } from "@stellar/stellar-sdk/rpc";
 import {
@@ -14,6 +14,7 @@ import { toast } from "sonner";
 import { StateExplorer } from "@/components/ide/StateExplorer";
 import { ContractPanel } from "@/components/ide/ContractPanel";
 import { DeploymentStepper } from "@/components/ide/DeploymentStepper";
+import { XdrInspector } from "@/components/ide/XdrInspector";
 import { SidebarTab } from "@/store/workspaceStore";
 import { LazySidebar } from "@/components/layout/LazySidebar";
 import { HotkeysModal } from "@/components/ide/HotkeysModal";
@@ -278,6 +279,30 @@ export default function Index() {
   // Contract ID produced by the current deployment (shown in stepper on success)
   const [deployedContractId, setDeployedContractId] = useState<string | null>(
     null,
+  );
+
+  // Pre-signing XDR review state. The inspector is opened with a base64
+  // envelope XDR; the user's approve/reject decision resolves the promise
+  // returned to `instantiateContract`.
+  const [pendingXdr, setPendingXdr] = useState<string | null>(null);
+  const [pendingXdrPassphrase, setPendingXdrPassphrase] = useState<string>("");
+  const xdrResolverRef = useRef<((approved: boolean) => void) | null>(null);
+
+  const resolveXdrReview = useCallback((approved: boolean) => {
+    const resolver = xdrResolverRef.current;
+    xdrResolverRef.current = null;
+    setPendingXdr(null);
+    resolver?.(approved);
+  }, []);
+
+  const requestXdrConfirmation = useCallback(
+    (xdr: string, passphrase: string) =>
+      new Promise<boolean>((resolve) => {
+        xdrResolverRef.current = resolve;
+        setPendingXdrPassphrase(passphrase);
+        setPendingXdr(xdr);
+      }),
+    [],
   );
 
   const [bottomTab, setBottomTab] = useState<"console" | "events" | "proptest">(
@@ -749,6 +774,18 @@ export default function Index() {
           onStatus: (s) => {
             appendTerminalOutput(`  [instantiate] ${s.message}\r\n`);
           },
+          onConfirmXdr: async (xdr) => {
+            appendTerminalOutput(
+              "  [instantiate] Awaiting user approval of decoded XDR…\r\n",
+            );
+            const approved = await requestXdrConfirmation(xdr, networkPassphrase);
+            appendTerminalOutput(
+              approved
+                ? "  [instantiate] XDR approved — proceeding to sign.\r\n"
+                : "  [instantiate] XDR rejected — aborting signature.\r\n",
+            );
+            return approved;
+          },
         });
 
       setContractId(newContractId);
@@ -794,6 +831,7 @@ export default function Index() {
       auditUser,
       contractName,
       network,
+      requestXdrConfirmation,
       setContractId,
       setDeploymentStep,
       setPendingWasmHash,
@@ -1691,6 +1729,14 @@ export default function Index() {
       {syncStatus === "conflict" && conflictData && (
         <ConflictModal conflictData={conflictData} />
       )}
+      {/* ── Pre-signing XDR review modal ───────────────────────────── */}
+      <XdrInspector
+        open={pendingXdr !== null}
+        xdr={pendingXdr}
+        networkPassphrase={pendingXdrPassphrase}
+        onApprove={() => resolveXdrReview(true)}
+        onReject={() => resolveXdrReview(false)}
+      />
       {/* ── Deployment progress modal ──────────────────────────────── */}
       <DeploymentStepper
         open={isDeployModalOpen}
