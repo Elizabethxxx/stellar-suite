@@ -1,3 +1,13 @@
+/**
+ * AuditMiddleware — Zustand middleware for global audit trails.
+ *
+ * Intercepts state patches carrying an `__auditEvent__` sentinel key and
+ * forwards them to `useAuditLogStore` automatically. Zero manual addLog
+ * calls required in stores that are wrapped with `auditMiddleware`.
+ *
+ * feat: global-audit-middleware  (#823)
+ */
+
 import type { StateCreator, StoreMutatorIdentifier } from "zustand";
 import { useAuditLogStore, type AuditCategory, type AuditStatus } from "./useAuditLogStore";
 
@@ -147,16 +157,45 @@ function _dispatchAuditEvent(event: AuditEvent): void {
 
 /** Well-known action labels used across Build, Deploy, and Sign flows. */
 export const AUDIT_ACTIONS = {
-  BUILD_START: "Contract Build",
-  BUILD_SUCCESS: "Contract Build",
-  BUILD_FAILURE: "Contract Build",
-  DEPLOY_UPLOAD: "Contract Deploy",
-  DEPLOY_INSTANTIATE: "Contract Deploy",
-  DEPLOY_SUCCESS: "Contract Deploy",
-  DEPLOY_FAILURE: "Contract Deploy",
-  INVOKE_SIGN: "Contract Sign",
-  INVOKE_SUBMIT: "Contract Invoke",
-  INVOKE_FAILURE: "Contract Invoke",
-  SECURITY_AUDIT: "Security Audit",
-  CLIPPY_RUN: "Clippy Lint",
+  BUILD_START:         "Contract Build",
+  BUILD_SUCCESS:       "Contract Build",
+  BUILD_FAILURE:       "Contract Build",
+  DEPLOY_UPLOAD:       "Contract Deploy",
+  DEPLOY_INSTANTIATE:  "Contract Deploy",
+  DEPLOY_SUCCESS:      "Contract Deploy",
+  DEPLOY_FAILURE:      "Contract Deploy",
+  INVOKE_SIGN:         "Contract Sign",
+  INVOKE_SUBMIT:       "Contract Invoke",
+  INVOKE_FAILURE:      "Contract Invoke",
+  SECURITY_AUDIT:      "Security Audit",
+  CLIPPY_RUN:          "Clippy Lint",
+  SIGN_TX:             "Transaction Sign",
+  SIGN_TX_FAILURE:     "Transaction Sign",
 } as const;
+
+/**
+ * Factory that creates a pre-filled `AuditEvent` builder for a given
+ * category + action pair, so individual stores don’t repeat boilerplate.
+ *
+ * @example
+ * ```ts
+ * const buildEvent = createAuditAction("build", AUDIT_ACTIONS.BUILD_START);
+ *
+ * // Inside a store action:
+ * set(withAudit(
+ *   { buildState: "compiling" },
+ *   buildEvent("success", user, { contract }),
+ * ));
+ * ```
+ */
+export function createAuditAction(
+  category: AuditCategory,
+  action: string,
+) {
+  return (
+    status: AuditStatus,
+    user: string,
+    params?: Record<string, unknown>,
+    details?: string,
+  ): AuditEvent => ({ category, action, status, user, params, details });
+}
