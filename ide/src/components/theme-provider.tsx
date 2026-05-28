@@ -36,7 +36,7 @@ export function ThemeProvider({ children, ...props }: ThemeProviderProps) {
   );
 }
 
-// ── Theme Toggle ──────────────────────────────────────────────────────────────
+// ── Theme Toggle ─────────────────────────────────────────────────────────
 
 const THEMES: { value: AppTheme; label: string }[] = [
   { value: "dark", label: "Dark" },
