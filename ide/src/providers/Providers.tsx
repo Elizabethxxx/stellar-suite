@@ -6,6 +6,7 @@ import { ThemeProvider } from "@/components/providers/ThemeProvider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ReactNode, useState, useEffect } from "react";
 import { registerServiceWorker } from "@/utils/registerServiceWorker";
+import { RedactionProvider } from "@/components/ide/LogRedactor";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
@@ -27,7 +28,9 @@ export function Providers({ children }: { children: ReactNode }) {
           disableTransitionOnChange
         >
           <TooltipProvider>
-            {children}
+            <RedactionProvider>
+              {children}
+            </RedactionProvider>
           </TooltipProvider>
         </ThemeProvider>
       </QueryClientProvider>

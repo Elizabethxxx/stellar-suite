@@ -5,6 +5,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { useTerminalStore } from "@/store/useTerminalStore";
+import { useRedaction } from "@/components/ide/LogRedactor";
 
 /**
  * TerminalPane
@@ -21,7 +22,15 @@ export function TerminalPane() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
 
-  const { pendingLines, clearPending, setWriter } = useTerminalStore();
+  const { pendingLines, clearPending, setWriter, setRedactionEnabled } = useTerminalStore();
+  const { redacted } = useRedaction();
+
+  // Mirror the global redaction mode into the terminal store so non-React
+  // callers of `writeToTerminal` (build pipeline, RPC handlers) automatically
+  // pick up the current setting.
+  useEffect(() => {
+    setRedactionEnabled(redacted);
+  }, [redacted, setRedactionEnabled]);
 
   // ── Boot xterm once on mount ──────────────────────────────────────────
   useEffect(() => {
