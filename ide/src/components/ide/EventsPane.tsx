@@ -118,7 +118,7 @@ const EventRow = React.memo(function EventRow({ event, index }: EventRowProps) {
         <div className="border-t border-white/5 bg-black/20 px-3 py-2">
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
             <dt className="text-white/30">id</dt>
-            <dd className="break-all text-white/60">{event.id}</dd>
+            <RedactedText as="div" text={event.id} className="break-all text-white/60" />
 
             <dt className="text-white/30">contract</dt>
             <dd className="break-all text-white/60">{safeContractId}</dd>

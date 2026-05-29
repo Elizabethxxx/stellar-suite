@@ -510,12 +510,21 @@ export default function Index() {
         url: COMPILE_API_URL,
         payload: compilePayload,
         onChunk: appendTerminalOutput,
+        contractName,
+        // Stream-parse diagnostics as chunks arrive so Monaco markers light up
+        // line-by-line during the build instead of waiting for completion.
+        onCompileStart: clearDiagnostics,
+        onDiagnostics: setDiagnostics,
       });
 
-      // Offload diagnostics parsing to worker to keep UI responsive
-      const diagnosticsWorker = getDiagnosticsWorker();
-      const diagnostics = await diagnosticsWorker.parseDiagnostics(result.output, contractName);
-      setDiagnostics(diagnostics);
+      // Belt-and-braces fallback: if the streaming session yielded nothing
+      // (e.g. backend ran without --message-format=json), run the cumulative
+      // parser on the full output so users still see markers.
+      if (useDiagnosticsStore.getState().diagnostics.length === 0) {
+        const diagnosticsWorker = getDiagnosticsWorker();
+        const diagnostics = await diagnosticsWorker.parseDiagnostics(result.output, contractName);
+        setDiagnostics(diagnostics);
+      }
 
       if (!result.ok) {
         throw new Error(
