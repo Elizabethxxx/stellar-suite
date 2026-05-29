@@ -9,6 +9,7 @@ import {
   Activity,
 } from "lucide-react";
 import { toast } from "sonner";
+import * as Sentry from "@sentry/nextjs";
 
 
 import { StateExplorer } from "@/components/ide/StateExplorer";
@@ -96,6 +97,19 @@ const toCompilePath = (pathParts: string[]) => {
   }
 
   return pathParts.join("/");
+};
+
+const recordMonitoringBreadcrumb = (
+  category: string,
+  message: string,
+  data?: Record<string, unknown>,
+) => {
+  Sentry.addBreadcrumb({
+    category,
+    message,
+    data,
+    level: "info",
+  });
 };
 
 const flattenProjectFiles = (nodes: FileNode[], parentPath: string[] = []) =>
@@ -479,6 +493,13 @@ export default function Index() {
   );
 
   const handleCompile = useCallback(async () => {
+    recordMonitoringBreadcrumb("ide.build", "Build started", {
+      network,
+      contractId: contractId ? `${contractId.slice(0, 8)}…` : null,
+      environmentSlot: selectedEnvironmentSlot.id,
+      localBuild: useUserSettingsStore.getState().experimentalLocalBuild,
+    });
+
     setIsCompiling(true);
     setBuildState("building");
     clearDiagnostics();
@@ -542,6 +563,17 @@ export default function Index() {
         setBuildState("idle");
       } else {
         const message = error instanceof Error ? error.message : "Build failed";
+        Sentry.captureException(error instanceof Error ? error : new Error(message), {
+          tags: {
+            flow: "build",
+            network,
+            environmentSlot: selectedEnvironmentSlot.id,
+          },
+          extra: {
+            contractId: contractId ? `${contractId.slice(0, 8)}…` : null,
+            localBuild: useUserSettingsStore.getState().experimentalLocalBuild,
+          },
+        });
         appendTerminalOutput(`Build failed: ${message}\r\n`);
         setBuildState("error");
         addAuditLog({
@@ -844,6 +876,12 @@ export default function Index() {
    *   Phase 2 — createContract         → contractId (C...)
    */
   const handleDeploy = useCallback(async () => {
+    recordMonitoringBreadcrumb("ide.deploy", "Deploy started", {
+      network,
+      contractId: contractId ? `${contractId.slice(0, 8)}…` : null,
+      environmentSlot: selectedEnvironmentSlot.id,
+    });
+
     appendTerminalOutput(`[env: ${selectedEnvironmentSlot.id}]\r\n`);
     if (
       selectedEnvironmentSlot.cargoFeatures &&
@@ -969,6 +1007,17 @@ export default function Index() {
       await runInstantiate(wasmHash);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Deployment failed";
+      Sentry.captureException(err instanceof Error ? err : new Error(message), {
+        tags: {
+          flow: "deploy",
+          network,
+          environmentSlot: selectedEnvironmentSlot.id,
+        },
+        extra: {
+          contractId: contractId ? `${contractId.slice(0, 8)}…` : null,
+          deployedContractId: deployedContractId ? `${deployedContractId.slice(0, 8)}…` : null,
+        },
+      });
       setDeploymentStep("error");
       setDeploymentError(message);
       appendTerminalOutput(`✗ Deployment failed: ${message}\r\n`);
