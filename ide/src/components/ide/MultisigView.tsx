@@ -20,6 +20,10 @@ import { useIdentityStore } from "@/store/useIdentityStore";
 import { NETWORK_CONFIG, type NetworkKey } from "@/lib/networkConfig";
 import { Badge } from "@/components/ui/badge";
 import { XdrChecksumCard } from "@/components/ide/XdrChecksumCard";
+import {
+  formatXdrValidationError,
+  validateTransactionEnvelopeXdr,
+} from "@/utils/XdrValidator";
 
 interface MultisigViewProps {
   network: NetworkKey;
@@ -74,6 +78,12 @@ export function MultisigView({ network }: MultisigViewProps) {
 
     const passphrase =
       NETWORK_CONFIG[selectedNetwork]?.passphrase ?? "Test SDF Network ; September 2015";
+
+    const validation = validateTransactionEnvelopeXdr(trimmed, passphrase);
+    if (!validation.ok) {
+      setFormError(formatXdrValidationError(validation));
+      return;
+    }
 
     try {
       startSession(trimmed, parsedThreshold, passphrase);

@@ -22,7 +22,6 @@ import {
 import {
   FeeBumpTransaction,
   Transaction,
-  TransactionBuilder,
 } from "@stellar/stellar-sdk";
 
 import { Badge } from "@/components/ui/badge";
@@ -36,6 +35,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import {
+  formatXdrValidationError,
+  validateTransactionEnvelopeXdr,
+} from "@/utils/XdrValidator";
 
 // Operations whose effect modifies authentication / authorization,
 // recovers funds, or destroys an account — always surfaced as sensitive.
@@ -269,10 +272,20 @@ const decode = (xdrStr: string | null, networkPassphrase: string): DecodedTx | n
   if (!xdrStr) return null;
 
   try {
-    const tx = TransactionBuilder.fromXDR(
-      xdrStr.replace(/\s+/g, ""),
-      networkPassphrase,
-    );
+    const validation = validateTransactionEnvelopeXdr(xdrStr, networkPassphrase);
+    if (!validation.ok) {
+      return {
+        source: "",
+        fee: "",
+        feeStroops: 0,
+        operations: [],
+        isFeeBump: false,
+        feeWarning: null,
+        decodeError: formatXdrValidationError(validation),
+      };
+    }
+
+    const tx = validation.transaction;
 
     const isFeeBump = tx instanceof FeeBumpTransaction;
     const inner: Transaction = isFeeBump

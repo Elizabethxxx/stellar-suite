@@ -221,6 +221,8 @@ describe("XdrInspector", () => {
     // The dialog renders via portal; query through `screen` so the
     // role-scoped lookups find content outside the test root.
     expect(screen.getByTestId("xdr-inspector-approve")).toBeDisabled();
-    expect(screen.getByRole("dialog")).toHaveTextContent(/XDR/i);
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      /valid standard Base64/i,
+    );
   });
 });
