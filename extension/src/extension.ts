@@ -22,6 +22,7 @@ import { SorobanLinterService } from './services/LinterService';
 import { HealthAlertsService } from './services/HealthAlerts';
 import { getLatencyMonitor } from './ui/networkStatusBar';
 import { registerSorobanCompletionProvider } from './providers/SorobanCompletionProvider';
+import { SecretSyncService } from './services/SecretSyncService';
 
 let sidebarProvider: SidebarViewProvider | undefined;
 
@@ -40,6 +41,7 @@ export async function activate(context: vscode.ExtensionContext) {
         );
         
         registerOpenInWebIDECommand(context);
+        const secretSyncService = new SecretSyncService(context);
 
         outputChannel.appendLine('[Extension] Checking for Stellar CLI in PATH...');
         const cliPath = await SorobanCliService.findCliPath();
@@ -129,9 +131,9 @@ export async function activate(context: vscode.ExtensionContext) {
             }
         );
 
-        const keysGenerateCommand = vscode.commands.registerCommand('stellarSuite.keysGenerate', () => keysGenerate());
+        const keysGenerateCommand = vscode.commands.registerCommand('stellarSuite.keysGenerate', () => keysGenerate(secretSyncService));
         const keysFundCommand = vscode.commands.registerCommand('stellarSuite.keysFund', () => keysFund());
-        const keysListCommand = vscode.commands.registerCommand('stellarSuite.keysList', () => keysList());
+        const keysListCommand = vscode.commands.registerCommand('stellarSuite.keysList', () => keysList(secretSyncService));
 
         const generateBindingsCommand = vscode.commands.registerCommand('stellarSuite.generateBindings', (item) => {
             return generateBindings(item);
