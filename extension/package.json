@@ -297,6 +297,11 @@
           "type": "boolean",
           "default": true,
           "description": "Run the Soroban linter on Rust files and surface diagnostics in the Problems panel."
+        },
+        "stellarSuite.secretSync.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Sync Stellar identities across VS Code workspaces using native SecretStorage. Secret keys are never written to workspace settings or logs."
         }
       }
     }
