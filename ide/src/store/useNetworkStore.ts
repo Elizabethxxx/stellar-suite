@@ -1,7 +1,7 @@
 /**
  * src/store/useNetworkStore.ts
  * ─────────────────────────────────────────────────────────────────────────────
- * Centralized Network Configuration Store  — Issue #647
+ * Centralized Network Configuration Store  — Issue #824
  * Multi-Network Parallelism                — Issue #657
  *
  * Single source of truth for:
@@ -12,22 +12,10 @@
  *  • Custom RPC headers
  *  • Named custom network profiles (CRUD)
  *  • Isolated per-network workspace state (deployments, env vars, notes)
+ *  • RPC connectivity & health testing
  *
  * All state is persisted to localStorage under the key
  * "stellar-suite-network-store" so user preferences survive page reloads.
- *
- * Design notes
- * ────────────
- * • Extends `NetworkKey` with a "custom" literal so components can distinguish
- *   between a built-in preset and a fully user-defined endpoint.
- * • `resolvedRpcUrl` / `resolvedPassphrase` are derived getters that merge
- *   the active preset with any user override — no component needs to do this
- *   logic themselves.
- * • Validation is run on every URL/passphrase setter so invalid values are
- *   rejected immediately and an `error` field is set for UI feedback.
- * • `networkWorkspaces` holds isolated state keyed by network ID so that
- *   Testnet and Mainnet (and any custom network) maintain independent
- *   deployment lists, environment variables, and scratch notes.
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -77,10 +65,6 @@ export interface ValidationResult {
   error?: string;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Multi-network workspace isolation — Issue #657
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Isolated workspace state scoped to a single network.
  * Each network (testnet, mainnet, custom, …) has its own slot so that
@@ -106,6 +90,8 @@ export interface DeployedContractEntry {
   label: string | null;
   deployedAt: string;
 }
+
+export type ConnectionHealth = "online" | "offline" | "checking" | "unknown";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State interface
@@ -139,12 +125,17 @@ export interface NetworkStoreState {
   /** Ordered list of user-saved custom network profiles */
   profiles: CustomNetworkProfile[];
 
-  // ── UI state ─────────────────────────────────────────────────────────────
+  // ── UI / Health states ───────────────────────────────────────────────────
 
   /** Last validation error, cleared when state becomes valid */
   validationError: string | null;
   /** ISO timestamp of last successful network selection change */
   lastChangedAt: string | null;
+
+  /** Connection health keyed by network key/profile ID */
+  connectivityStatus: Record<string, ConnectionHealth>;
+  /** Connection latency in ms keyed by network key/profile ID */
+  connectivityLatency: Record<string, number>;
 
   // ── Per-network workspace isolation — Issue #657 ──────────────────────────
 
@@ -260,6 +251,14 @@ export interface NetworkStoreState {
   /** Reset everything back to factory defaults. */
   reset: () => void;
 
+  // ── Connectivity Checks ──────────────────────────────────────────────────
+
+  /** Ping the resolved URL for the given network key or custom profile ID to check health */
+  checkConnectivity: (target?: ExtendedNetworkKey | string) => Promise<{ online: boolean; latency?: number; error?: string }>;
+
+  /** Ping all configured network presets and active custom profiles */
+  checkAllConnectivity: () => Promise<void>;
+
   // ── Workspace actions — Issue #657 ────────────────────────────────────────
 
   /**
@@ -351,6 +350,8 @@ const DEFAULTS = {
   profiles: [] as CustomNetworkProfile[],
   validationError: null as string | null,
   lastChangedAt: null as string | null,
+  connectivityStatus: {} as Record<string, ConnectionHealth>,
+  connectivityLatency: {} as Record<string, number>,
   networkWorkspaces: {} as Record<string, NetworkWorkspace>,
 };
 
@@ -628,6 +629,82 @@ export const useNetworkStore = create<NetworkStoreState>()(
           ...DEFAULTS,
           lastChangedAt: now(),
         }),
+
+      // ── Connectivity Checks ────────────────────────────────────────────────
+
+      checkConnectivity: async (target) => {
+        const s = get();
+        const key = target ?? s.activeNetwork;
+
+        let url = "";
+        let headers: CustomHeaders = {};
+
+        // Resolve RPC URL for targets
+        if (key === "custom") {
+          url = s.customRpcUrl || DEFAULT_CUSTOM_RPC;
+          headers = s.customHeaders;
+        } else if (typeof key === "string" && s.profiles.some((p) => p.id === key)) {
+          const profile = s.profiles.find((p) => p.id === key)!;
+          url = profile.rpcUrl;
+          headers = profile.headers ?? {};
+        } else {
+          url = NETWORK_CONFIG[key as NetworkKey]?.horizon ?? DEFAULT_CUSTOM_RPC;
+          headers = {};
+        }
+
+        set((state) => ({
+          connectivityStatus: { ...state.connectivityStatus, [key]: "checking" },
+        }));
+
+        const startTime = Date.now();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...headers,
+            },
+            body: JSON.stringify({
+              jsonrpc: "2.0",
+              id: 1,
+              method: "getHealth",
+            }),
+            signal: controller.signal,
+          });
+
+          clearTimeout(timeoutId);
+          const latency = Date.now() - startTime;
+
+          if (response.ok) {
+            set((state) => ({
+              connectivityStatus: { ...state.connectivityStatus, [key]: "online" },
+              connectivityLatency: { ...state.connectivityLatency, [key]: latency },
+            }));
+            return { online: true, latency };
+          } else {
+            throw new Error(`HTTP ${response.status}`);
+          }
+        } catch (err) {
+          clearTimeout(timeoutId);
+          const errorMsg = err instanceof Error ? err.message : String(err);
+          set((state) => ({
+            connectivityStatus: { ...state.connectivityStatus, [key]: "offline" },
+            connectivityLatency: { ...state.connectivityLatency, [key]: -1 },
+          }));
+          return { online: false, error: errorMsg };
+        }
+      },
+
+      checkAllConnectivity: async () => {
+        const s = get();
+        const builtIns: ExtendedNetworkKey[] = ["testnet", "mainnet", "futurenet", "local"];
+        const profileIds = s.profiles.map((p) => p.id);
+        const allKeys = [...builtIns, ...profileIds];
+        await Promise.all(allKeys.map((k) => s.checkConnectivity(k)));
+      },
 
       // ── Workspace: derived getter — Issue #657 ────────────────────────────
 

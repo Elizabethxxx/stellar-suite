@@ -123,7 +123,6 @@ const RULES: LintRule[] = [
     {
         id: 'env-not-first-arg',
         severity: vscode.DiagnosticSeverity.Warning,
-        // matches `pub fn foo(<not env>:` inside a #[contractimpl] file when first arg isn't `env: Env`
         pattern: /pub\s+fn\s+\w+\s*\(\s*(?!env\s*:\s*Env|_env\s*:\s*Env|&self|&mut\s+self|self)([a-zA-Z_]\w*)\s*:/g,
         message: 'Public contract functions usually take `env: Env` as the first parameter',
         explanation:
@@ -267,6 +266,7 @@ export class SorobanLinterService implements vscode.Disposable, vscode.CodeActio
         const diagnostics: vscode.Diagnostic[] = [];
         const text = document.getText();
         for (const rule of RULES) {
+            const severity = getRuleSeverity(rule.id, rule.severity);
             for (const match of matchAll(text, rule.pattern)) {
                 if (isInCommentOrString(text, match.index ?? 0)) {
                     continue;
@@ -275,7 +275,7 @@ export class SorobanLinterService implements vscode.Disposable, vscode.CodeActio
                 const end = document.positionAt((match.index ?? 0) + match[0].length);
                 const range = new vscode.Range(start, end);
 
-                const diagnostic = new vscode.Diagnostic(range, rule.message, rule.severity);
+                const diagnostic = new vscode.Diagnostic(range, rule.message, severity);
                 diagnostic.code = rule.id;
                 diagnostic.source = SOROBAN_LINTER_SOURCE;
 
@@ -320,6 +320,27 @@ export class SorobanLinterService implements vscode.Disposable, vscode.CodeActio
             return false;
         }
         return true;
+    }
+}
+
+function getRuleSeverity(ruleId: string, defaultSeverity: vscode.DiagnosticSeverity): vscode.DiagnosticSeverity {
+    const cfg = vscode.workspace.getConfiguration(`stellarSuite.linter.rules.${ruleId}`);
+    const severityStr = cfg.get<string>('severity');
+    if (!severityStr) {
+        return defaultSeverity;
+    }
+    switch (severityStr.toLowerCase()) {
+        case 'error':
+            return vscode.DiagnosticSeverity.Error;
+        case 'warning':
+            return vscode.DiagnosticSeverity.Warning;
+        case 'info':
+        case 'information':
+            return vscode.DiagnosticSeverity.Information;
+        case 'hint':
+            return vscode.DiagnosticSeverity.Hint;
+        default:
+            return defaultSeverity;
     }
 }
 

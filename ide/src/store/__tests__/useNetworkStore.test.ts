@@ -5,7 +5,7 @@
  * ──────────────────────────────────────────────────────────────
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useNetworkStore } from "../useNetworkStore";
 import { NETWORK_CONFIG } from "@/lib/networkConfig";
 
@@ -389,5 +389,41 @@ describe("reset", () => {
     expect(s.activeNetwork).toBe("testnet");
     expect(s.profiles).toHaveLength(0);
     expect(s.customPassphrase).toBe("");
+  });
+});
+
+describe("connectivity checks", () => {
+  const originalFetch = global.fetch;
+
+  beforeEach(() => {
+    global.fetch = originalFetch;
+  });
+
+  it("handles successful checkConnectivity", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { status: "healthy" } }),
+    } as unknown as Response);
+
+    const s = useNetworkStore.getState();
+    const res = await s.checkConnectivity("testnet");
+
+    expect(res.online).toBe(true);
+    expect(res.latency).toBeGreaterThanOrEqual(0);
+    expect(useNetworkStore.getState().connectivityStatus["testnet"]).toBe("online");
+  });
+
+  it("handles failed checkConnectivity", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    } as unknown as Response);
+
+    const s = useNetworkStore.getState();
+    const res = await s.checkConnectivity("testnet");
+
+    expect(res.online).toBe(false);
+    expect(res.error).toContain("HTTP 500");
+    expect(useNetworkStore.getState().connectivityStatus["testnet"]).toBe("offline");
   });
 });
