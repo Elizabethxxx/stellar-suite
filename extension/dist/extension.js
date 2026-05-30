@@ -2923,7 +2923,7 @@ var require_keyManager = __commonJS({
     exports2.keysList = exports2.fundIdentity = exports2.keysFund = exports2.keysGenerate = void 0;
     var vscode2 = __importStar2(require("vscode"));
     var sorobanCliService_12 = require_sorobanCliService();
-    async function keysGenerate() {
+    async function keysGenerate(secretSync) {
       const name = await vscode2.window.showInputBox({
         prompt: "Enter a name for the new identity",
         placeHolder: "e.g., alice, bob, dev"
@@ -2938,6 +2938,7 @@ var require_keyManager = __commonJS({
         }, async () => {
           await (0, sorobanCliService_12.execAsync)(`stellar keys generate ${name}`);
         });
+        await syncIdentitySecret(secretSync, name);
         vscode2.window.showInformationMessage(`Successfully generated identity: ${name}`);
       } catch (e) {
         vscode2.window.showErrorMessage(`Failed to generate identity: ${e.message}`);
@@ -2979,7 +2980,7 @@ var require_keyManager = __commonJS({
       }
     }
     exports2.fundIdentity = fundIdentity;
-    async function keysList() {
+    async function keysList(secretSync) {
       try {
         const { stdout } = await (0, sorobanCliService_12.execAsync)("stellar keys ls");
         const lines = stdout.split("\n").map((l) => l.trim()).filter(Boolean);
@@ -3029,12 +3030,47 @@ var require_keyManager = __commonJS({
           } else if (action?.id === "fund_account") {
             await fundIdentity(selected.rawName);
           }
+          await syncIdentitySecret(secretSync, selected.rawName, selected.rawPubKey);
         }
       } catch (e) {
         vscode2.window.showErrorMessage(`Failed to list keys: ${e.message}`);
       }
     }
     exports2.keysList = keysList;
+    async function syncIdentitySecret(secretSync, name, knownPublicKey) {
+      if (!secretSync) {
+        return;
+      }
+      if (!secretSync.isEnabled()) {
+        return;
+      }
+      const publicKey = knownPublicKey || (await (0, sorobanCliService_12.execAsync)(`stellar keys address ${name}`)).stdout.trim();
+      const privateKey = await readPrivateKey(name);
+      if (publicKey && privateKey) {
+        await secretSync.storeIdentity({
+          name,
+          publicKey,
+          network: vscode2.workspace.getConfiguration("stellarSuite").get("network", "testnet")
+        }, privateKey);
+      }
+    }
+    async function readPrivateKey(name) {
+      const commands = [
+        `stellar keys show ${name} --secret`,
+        `stellar keys secret ${name}`
+      ];
+      for (const command of commands) {
+        try {
+          const { stdout } = await (0, sorobanCliService_12.execAsync)(command);
+          const secret = stdout.trim().split(/\s+/).find((part) => /^S[A-Z2-7]{55}$/.test(part));
+          if (secret) {
+            return secret;
+          }
+        } catch {
+        }
+      }
+      return void 0;
+    }
   }
 });
 
@@ -5232,6 +5268,99 @@ var require_sidebarWebView = __commonJS({
   }
 });
 
+// out/services/WorkspaceScanner.js
+var require_WorkspaceScanner = __commonJS({
+  "out/services/WorkspaceScanner.js"(exports2) {
+    "use strict";
+    var __createBinding2 = exports2 && exports2.__createBinding || (Object.create ? function(o, m, k, k2) {
+      if (k2 === void 0)
+        k2 = k;
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
+    } : function(o, m, k, k2) {
+      if (k2 === void 0)
+        k2 = k;
+      o[k2] = m[k];
+    });
+    var __setModuleDefault2 = exports2 && exports2.__setModuleDefault || (Object.create ? function(o, v) {
+      Object.defineProperty(o, "default", { enumerable: true, value: v });
+    } : function(o, v) {
+      o["default"] = v;
+    });
+    var __importStar2 = exports2 && exports2.__importStar || function(mod) {
+      if (mod && mod.__esModule)
+        return mod;
+      var result = {};
+      if (mod != null) {
+        for (var k in mod)
+          if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k))
+            __createBinding2(result, mod, k);
+      }
+      __setModuleDefault2(result, mod);
+      return result;
+    };
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.WorkspaceScanner = void 0;
+    var vscode2 = __importStar2(require("vscode"));
+    var path = __importStar2(require("path"));
+    var EXCLUDE_GLOB = "{**/node_modules/**,**/target/**,**/.git/**,**/dist/**,**/out/**}";
+    var WorkspaceScanner = class {
+      static async findSorobanManifests(token) {
+        if (!vscode2.workspace.workspaceFolders) {
+          return [];
+        }
+        const manifests = [];
+        const seen = /* @__PURE__ */ new Set();
+        for (const folder of vscode2.workspace.workspaceFolders) {
+          const files = await vscode2.workspace.findFiles(new vscode2.RelativePattern(folder, "**/Cargo.toml"), EXCLUDE_GLOB, 500, token);
+          for (const file of files) {
+            if (token?.isCancellationRequested) {
+              return manifests;
+            }
+            const manifestPath = file.fsPath;
+            if (seen.has(manifestPath)) {
+              continue;
+            }
+            const manifest = await this.tryReadManifest(file);
+            if (!manifest || !this.hasSorobanSdkDependency(manifest)) {
+              continue;
+            }
+            seen.add(manifestPath);
+            manifests.push({
+              name: this.getPackageName(manifest) || path.basename(path.dirname(manifestPath)),
+              manifestPath,
+              directory: path.dirname(manifestPath)
+            });
+          }
+        }
+        return manifests.sort((a, b) => a.name.localeCompare(b.name));
+      }
+      static async tryReadManifest(uri) {
+        try {
+          const bytes = await vscode2.workspace.fs.readFile(uri);
+          return Buffer.from(bytes).toString("utf8");
+        } catch {
+          return void 0;
+        }
+      }
+      static hasSorobanSdkDependency(manifest) {
+        return /^\s*soroban-sdk\s*=/m.test(manifest) || /^\s*"soroban-sdk"\s*=/m.test(manifest);
+      }
+      static getPackageName(manifest) {
+        const packageSection = manifest.match(/^\s*\[package\][\s\S]*?(?=^\s*\[|\s*$)/m)?.[0];
+        const name = packageSection?.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1];
+        return name;
+      }
+    };
+    exports2.WorkspaceScanner = WorkspaceScanner;
+  }
+});
+
 // out/ui/sidebarView.js
 var require_sidebarView = __commonJS({
   "out/ui/sidebarView.js"(exports2) {
@@ -5272,8 +5401,9 @@ var require_sidebarView = __commonJS({
     exports2.SidebarViewProvider = void 0;
     var vscode2 = __importStar2(require("vscode"));
     var sidebarWebView_1 = require_sidebarWebView();
-    var wasmDetector_1 = require_wasmDetector();
     var sorobanCliService_12 = require_sorobanCliService();
+    var wasmDetector_1 = require_wasmDetector();
+    var WorkspaceScanner_1 = require_WorkspaceScanner();
     var SidebarViewProvider = class {
       constructor(_extensionUri, context) {
         this._extensionUri = _extensionUri;
@@ -5386,9 +5516,10 @@ var require_sidebarView = __commonJS({
       }
       async getContracts() {
         const contracts = [];
-        const contractDirs = await wasmDetector_1.WasmDetector.findContractDirectories();
-        for (const dir of contractDirs) {
-          const contractName = require("path").basename(dir);
+        const manifests = await WorkspaceScanner_1.WorkspaceScanner.findSorobanManifests();
+        for (const manifest of manifests) {
+          const dir = manifest.directory;
+          const contractName = manifest.name;
           const wasmPath = wasmDetector_1.WasmDetector.getExpectedWasmPath(dir);
           const fs = require("fs");
           const hasWasm = wasmPath && fs.existsSync(wasmPath);
@@ -6084,7 +6215,6 @@ var require_LinterService = __commonJS({
       {
         id: "env-not-first-arg",
         severity: vscode2.DiagnosticSeverity.Warning,
-        // matches `pub fn foo(<not env>:` inside a #[contractimpl] file when first arg isn't `env: Env`
         pattern: /pub\s+fn\s+\w+\s*\(\s*(?!env\s*:\s*Env|_env\s*:\s*Env|&self|&mut\s+self|self)([a-zA-Z_]\w*)\s*:/g,
         message: "Public contract functions usually take `env: Env` as the first parameter",
         explanation: "The `Env` handle is the only way to access storage, events, and the ledger. Convention is to make it the first parameter so callers and bindings stay consistent."
@@ -6187,6 +6317,7 @@ var require_LinterService = __commonJS({
         const diagnostics = [];
         const text = document.getText();
         for (const rule of RULES) {
+          const severity = getRuleSeverity(rule.id, rule.severity);
           for (const match of matchAll(text, rule.pattern)) {
             if (isInCommentOrString(text, match.index ?? 0)) {
               continue;
@@ -6194,7 +6325,7 @@ var require_LinterService = __commonJS({
             const start = document.positionAt(match.index ?? 0);
             const end = document.positionAt((match.index ?? 0) + match[0].length);
             const range = new vscode2.Range(start, end);
-            const diagnostic = new vscode2.Diagnostic(range, rule.message, rule.severity);
+            const diagnostic = new vscode2.Diagnostic(range, rule.message, severity);
             diagnostic.code = rule.id;
             diagnostic.source = SOROBAN_LINTER_SOURCE;
             if (rule.explanation) {
@@ -6235,6 +6366,26 @@ var require_LinterService = __commonJS({
     };
     exports2.SorobanLinterService = SorobanLinterService;
     SorobanLinterService.DIAGNOSTIC_SOURCE = SOROBAN_LINTER_SOURCE;
+    function getRuleSeverity(ruleId, defaultSeverity) {
+      const cfg = vscode2.workspace.getConfiguration(`stellarSuite.linter.rules.${ruleId}`);
+      const severityStr = cfg.get("severity");
+      if (!severityStr) {
+        return defaultSeverity;
+      }
+      switch (severityStr.toLowerCase()) {
+        case "error":
+          return vscode2.DiagnosticSeverity.Error;
+        case "warning":
+          return vscode2.DiagnosticSeverity.Warning;
+        case "info":
+        case "information":
+          return vscode2.DiagnosticSeverity.Information;
+        case "hint":
+          return vscode2.DiagnosticSeverity.Hint;
+        default:
+          return defaultSeverity;
+      }
+    }
     function* matchAll(text, pattern) {
       if (!pattern.global) {
         const m = text.match(pattern);
@@ -6343,6 +6494,7 @@ var require_HealthAlerts = __commonJS({
     Object.defineProperty(exports2, "__esModule", { value: true });
     exports2.HealthAlertsService = void 0;
     var vscode2 = __importStar2(require("vscode"));
+    var outputChannel_12 = require_outputChannel();
     var DEFAULTS = {
       enabled: true,
       latencySpikeMs: 1500,
@@ -6355,6 +6507,14 @@ var require_HealthAlerts = __commonJS({
         this.consecutiveFailures = 0;
         this.currentlyDown = false;
         this.lastNotifiedAt = {};
+        this.totalSamples = 0;
+        this.latencySpikesCount = 0;
+        this.downtimeEventsCount = 0;
+        this.recoveryEventsCount = 0;
+        this.totalLatencySum = 0;
+        this.successfulSamplesCount = 0;
+        this.onAlertEmitter = new vscode2.EventEmitter();
+        this.onAlert = this.onAlertEmitter.event;
         this.cfg = readConfig();
         this.subscription = this.monitor.onSample((sample, level) => this.handleSample(sample, level));
         this.configWatcher = vscode2.workspace.onDidChangeConfiguration((e) => {
@@ -6362,8 +6522,21 @@ var require_HealthAlerts = __commonJS({
             this.cfg = readConfig();
           }
         });
+        vscode2.commands.registerCommand("stellarSuite.getHealthAlertsSummary", () => this.showHealthSummaryReport());
+      }
+      getSummary() {
+        return {
+          totalSamples: this.totalSamples,
+          consecutiveFailures: this.consecutiveFailures,
+          latencySpikesCount: this.latencySpikesCount,
+          downtimeEventsCount: this.downtimeEventsCount,
+          recoveryEventsCount: this.recoveryEventsCount,
+          averageLatencyMs: this.successfulSamplesCount > 0 ? this.totalLatencySum / this.successfulSamplesCount : 0,
+          currentlyDown: this.currentlyDown
+        };
       }
       handleSample(sample, level) {
+        this.totalSamples += 1;
         if (!this.cfg.enabled) {
           return;
         }
@@ -6371,38 +6544,65 @@ var require_HealthAlerts = __commonJS({
           this.consecutiveFailures += 1;
           if (!this.currentlyDown && this.consecutiveFailures >= this.cfg.consecutiveFailuresForDowntime) {
             this.currentlyDown = true;
-            this.notifyDowntime(sample);
+            this.downtimeEventsCount += 1;
+            this.notifyDowntime(sample, level);
           }
           return;
         }
+        this.totalLatencySum += sample.latencyMs;
+        this.successfulSamplesCount += 1;
         const wasDown = this.currentlyDown;
         this.consecutiveFailures = 0;
         if (wasDown) {
           this.currentlyDown = false;
-          this.notifyRecovered(sample);
+          this.recoveryEventsCount += 1;
+          this.notifyRecovered(sample, level);
         }
         if (sample.latencyMs >= this.cfg.latencySpikeMs) {
+          this.latencySpikesCount += 1;
           this.notifyLatencySpike(sample, level);
         }
       }
-      notifyDowntime(sample) {
+      notifyDowntime(sample, level) {
+        const msg = `Stellar RPC node appears to be down (${this.consecutiveFailures} consecutive failures). Last error: ${sample.error ?? "unknown"}`;
+        (0, outputChannel_12.getSharedOutputChannel)().appendLine(`[HealthAlerts] DOWNTIME ALERT: ${msg}`);
+        this.onAlertEmitter.fire({
+          category: "downtime",
+          sample,
+          level,
+          message: msg
+        });
         if (!this.shouldNotify("downtime")) {
           return;
         }
-        const msg = `Stellar RPC node appears to be down (${this.consecutiveFailures} consecutive failures). Last error: ${sample.error ?? "unknown"}`;
         void vscode2.window.showWarningMessage(msg, "Switch Network", "Show Health", "Disable Alerts").then((action) => this.handleAction(action));
       }
-      notifyRecovered(sample) {
+      notifyRecovered(sample, level) {
+        const msg = `Stellar RPC is back online (latency ${sample.latencyMs}ms).`;
+        (0, outputChannel_12.getSharedOutputChannel)().appendLine(`[HealthAlerts] RECOVERY ALERT: ${msg}`);
+        this.onAlertEmitter.fire({
+          category: "recovered",
+          sample,
+          level,
+          message: msg
+        });
         if (!this.shouldNotify("recovered")) {
           return;
         }
-        void vscode2.window.showInformationMessage(`Stellar RPC is back online (latency ${sample.latencyMs}ms).`);
+        void vscode2.window.showInformationMessage(msg);
       }
       notifyLatencySpike(sample, level) {
+        const msg = `Stellar RPC latency is ${sample.latencyMs}ms (${level}) \u2014 above the configured ${this.cfg.latencySpikeMs}ms threshold.`;
+        (0, outputChannel_12.getSharedOutputChannel)().appendLine(`[HealthAlerts] LATENCY SPIKE ALERT: ${msg}`);
+        this.onAlertEmitter.fire({
+          category: "latency-spike",
+          sample,
+          level,
+          message: msg
+        });
         if (!this.shouldNotify("latency-spike")) {
           return;
         }
-        const msg = `Stellar RPC latency is ${sample.latencyMs}ms (${level}) \u2014 above the configured ${this.cfg.latencySpikeMs}ms threshold.`;
         void vscode2.window.showWarningMessage(msg, "Switch Network", "Show Health", "Disable Alerts").then((action) => this.handleAction(action));
       }
       handleAction(action) {
@@ -6430,9 +6630,29 @@ var require_HealthAlerts = __commonJS({
         this.lastNotifiedAt[category] = now;
         return true;
       }
+      showHealthSummaryReport() {
+        const summary = this.getSummary();
+        const rpcUrl = this.monitor.getLastSample() ? this.monitor.getSamples()[this.monitor.getSamples().length - 1] : void 0;
+        let report = `Stellar RPC Health Report:
+`;
+        report += `Status: ${summary.currentlyDown ? "\u{1F534} OFFLINE" : "\u{1F7E2} ONLINE"}
+`;
+        report += `Total monitored samples: ${summary.totalSamples}
+`;
+        report += `Avg Latency: ${summary.averageLatencyMs.toFixed(1)} ms
+`;
+        report += `Latency spikes: ${summary.latencySpikesCount}
+`;
+        report += `Downtime incidents: ${summary.downtimeEventsCount}
+`;
+        report += `Recoveries: ${summary.recoveryEventsCount}
+`;
+        vscode2.window.showInformationMessage(report, { modal: true });
+      }
       dispose() {
         this.subscription?.dispose();
         this.configWatcher.dispose();
+        this.onAlertEmitter.dispose();
       }
     };
     exports2.HealthAlertsService = HealthAlertsService;
@@ -6448,6 +6668,403 @@ var require_HealthAlerts = __commonJS({
     function clampPositive(value, fallback) {
       return Number.isFinite(value) && value > 0 ? value : fallback;
     }
+  }
+});
+
+// out/providers/SorobanCompletionProvider.js
+var require_SorobanCompletionProvider = __commonJS({
+  "out/providers/SorobanCompletionProvider.js"(exports2) {
+    "use strict";
+    var __createBinding2 = exports2 && exports2.__createBinding || (Object.create ? function(o, m, k, k2) {
+      if (k2 === void 0)
+        k2 = k;
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
+    } : function(o, m, k, k2) {
+      if (k2 === void 0)
+        k2 = k;
+      o[k2] = m[k];
+    });
+    var __setModuleDefault2 = exports2 && exports2.__setModuleDefault || (Object.create ? function(o, v) {
+      Object.defineProperty(o, "default", { enumerable: true, value: v });
+    } : function(o, v) {
+      o["default"] = v;
+    });
+    var __importStar2 = exports2 && exports2.__importStar || function(mod) {
+      if (mod && mod.__esModule)
+        return mod;
+      var result = {};
+      if (mod != null) {
+        for (var k in mod)
+          if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k))
+            __createBinding2(result, mod, k);
+      }
+      __setModuleDefault2(result, mod);
+      return result;
+    };
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.registerSorobanCompletionProvider = exports2.SorobanCompletionProvider = void 0;
+    var vscode2 = __importStar2(require("vscode"));
+    var SOROBAN_SNIPPETS = [
+      // ── Contract structure ─────────────────────────────────────────────────
+      {
+        label: "#[contract]",
+        detail: "Soroban contract struct",
+        documentation: "Marks a unit struct as a Soroban contract entry point. Pair with #[contractimpl] to expose public methods.",
+        insertText: "#[contract]\npub struct ${1:MyContract};",
+        sortText: "00_contract"
+      },
+      {
+        label: "#[contractimpl]",
+        detail: "Soroban contract implementation block",
+        documentation: "Exposes the `impl` block methods as callable contract functions. Every public `fn` that takes `Env` as the first argument becomes part of the contract ABI.",
+        insertText: "#[contractimpl]\nimpl ${1:MyContract} {\n    pub fn ${2:method}(env: Env${3:, arg: Type}) -> ${4:()} {\n        ${0}\n    }\n}",
+        sortText: "01_contractimpl"
+      },
+      {
+        label: "#[contracttype]",
+        detail: "Soroban host-compatible type",
+        documentation: "Makes a struct or enum serialisable across the host boundary so it can be stored in ledger entries or passed as function arguments.",
+        insertText: "#[contracttype]\n#[derive(Clone)]\npub ${1|struct,enum|} ${2:DataKey} {\n    ${0}\n}",
+        sortText: "02_contracttype"
+      },
+      {
+        label: "#[contracterror]",
+        detail: "Soroban typed error enum",
+        documentation: "Generates a u32-backed error enum that clients can decode. Variants map to structured error codes in the transaction result.",
+        insertText: "#[contracterror]\n#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]\n#[repr(u32)]\npub enum ${1:Error} {\n    ${2:NotInitialized} = 1,\n    ${3:Unauthorized}   = 2,\n    ${4:InvalidAmount}  = 3,\n    ${0}\n}",
+        sortText: "03_contracterror"
+      },
+      {
+        label: "contractmeta!",
+        detail: "Embed metadata into WASM",
+        documentation: "Stores a key/value pair in the compiled WASM custom section. Commonly used for contract description, version, and repository URL.",
+        insertText: 'soroban_sdk::contractmeta!(\n    key = "${1:Description}",\n    val = "${2:Short description}"\n);',
+        sortText: "04_contractmeta"
+      },
+      // ── Env helpers ────────────────────────────────────────────────────────
+      {
+        label: "Env::default()",
+        detail: "Test environment (testutils)",
+        documentation: "Creates an in-process Soroban test environment. Only available with the `testutils` feature. Call `mock_all_auths()` to bypass auth checks.",
+        insertText: "let env = Env::default();\nenv.mock_all_auths();",
+        sortText: "10_env_default"
+      },
+      {
+        label: "env.register()",
+        detail: "Register contract in test env",
+        documentation: "Registers a contract struct under test and returns a `ContractId`. Pair with `ContractClient::new(&env, &contract_id)` to invoke methods.",
+        insertText: "let contract_id = env.register(${1:MyContract}, ());\nlet ${2:client} = ${1:MyContract}Client::new(&env, &contract_id);",
+        sortText: "11_env_register"
+      },
+      {
+        label: "env.ledger().timestamp()",
+        detail: "Current ledger timestamp",
+        documentation: "Returns the deterministic ledger close time in unix seconds. Use this instead of `std::time` inside contracts.",
+        insertText: "let now: u64 = env.ledger().timestamp();",
+        sortText: "12_ledger_timestamp"
+      },
+      {
+        label: "env.ledger().sequence()",
+        detail: "Current ledger sequence",
+        documentation: "Returns the current ledger sequence number. Useful as a commit ledger, deadline, or random-seed input.",
+        insertText: "let seq: u32 = env.ledger().sequence();",
+        sortText: "13_ledger_sequence"
+      },
+      {
+        label: "env.events().publish()",
+        detail: "Publish a contract event",
+        documentation: "Emits an event with one or more topic symbols and a data payload. Indexers and clients use topics to filter events.",
+        insertText: 'env.events().publish((symbol_short!("${1:topic}"),), ${2:payload});',
+        sortText: "14_events_publish"
+      },
+      // ── Storage ────────────────────────────────────────────────────────────
+      {
+        label: "env.storage().instance().set()",
+        detail: "Write to instance storage",
+        documentation: "Writes a value to instance storage and should be followed by `extend_ttl`. Instance storage shares a single TTL for the whole contract.",
+        insertText: "env.storage().instance().set(&${1:DataKey::Admin}, &${2:value});\nenv.storage().instance().extend_ttl(${3:50}, ${4:100});",
+        sortText: "20_storage_instance_set"
+      },
+      {
+        label: "env.storage().instance().get()",
+        detail: "Read from instance storage",
+        documentation: "Reads a value from instance storage. Returns `None` if the key does not exist \u2014 use `unwrap_or_default()` for a safe default.",
+        insertText: "let ${1:value}: ${2:Type} = env.storage().instance().get(&${3:DataKey::Admin}).unwrap_or_default();",
+        sortText: "21_storage_instance_get"
+      },
+      {
+        label: "env.storage().persistent().set()",
+        detail: "Write to persistent storage",
+        documentation: "Writes to persistent storage. Each key has its own TTL \u2014 always extend it right after writing to prevent premature archival.",
+        insertText: "env.storage().persistent().set(&${1:key}, &${2:value});\nenv.storage().persistent().extend_ttl(&${1:key}, ${3:50}, ${4:100});",
+        sortText: "22_storage_persistent_set"
+      },
+      {
+        label: "env.storage().persistent().get()",
+        detail: "Read from persistent storage",
+        documentation: "Reads a persistent ledger entry. Returns `None` on first access \u2014 prefer `unwrap_or_default()` over `unwrap()` for safer reads.",
+        insertText: "let ${1:value}: ${2:Type} = env.storage().persistent().get(&${3:key}).unwrap_or_default();",
+        sortText: "23_storage_persistent_get"
+      },
+      {
+        label: "env.storage().temporary().set()",
+        detail: "Write to temporary storage",
+        documentation: "Writes to temporary storage (cheaper than persistent). Entries are permanently lost once expired \u2014 use for nonces, rate limits, or short-lived state.",
+        insertText: "env.storage().temporary().set(&${1:key}, &${2:value});\nenv.storage().temporary().extend_ttl(&${1:key}, ${3:50}, ${4:100});",
+        sortText: "24_storage_temporary_set"
+      },
+      {
+        label: "extend_ttl()",
+        detail: "Extend storage entry TTL",
+        documentation: "Extends the TTL of a ledger entry. The first arg is the threshold (only bumps if current TTL < threshold); the second is the new TTL.",
+        insertText: "env.storage().${1|persistent,temporary,instance|}().extend_ttl(&${2:key}, ${3:50}, ${4:100});",
+        sortText: "25_extend_ttl"
+      },
+      // ── Auth ───────────────────────────────────────────────────────────────
+      {
+        label: "require_auth()",
+        detail: "Assert address authorised invocation",
+        documentation: "Panics unless the address has signed or approved the current invocation. Always call this before mutating state on behalf of a user.",
+        insertText: "${1:caller}.require_auth();",
+        sortText: "30_require_auth"
+      },
+      {
+        label: "require_auth_for_args()",
+        detail: "Assert auth for specific args",
+        documentation: "Narrower than `require_auth()` \u2014 checks the address authorised a specific argument tuple, preventing blanket approvals.",
+        insertText: "${1:caller}.require_auth_for_args((${2:arg1}, ${3:arg2}).into_val(&env));",
+        sortText: "31_require_auth_for_args"
+      },
+      {
+        label: "mock_all_auths()",
+        detail: "Bypass all auth checks (tests only)",
+        documentation: "Mocks every `require_auth` call to succeed. Use in tests where auth logic is not under test. Requires the `testutils` feature.",
+        insertText: "env.mock_all_auths();",
+        sortText: "32_mock_all_auths"
+      },
+      {
+        label: "mock_auths()",
+        detail: "Mock specific address + args (tests only)",
+        documentation: "Asserts that a specific address authorised a specific contract call with specific arguments. More precise than `mock_all_auths`.",
+        insertText: 'use soroban_sdk::testutils::{Address as _, MockAuth, MockAuthInvoke};\nuse soroban_sdk::IntoVal;\n\nclient\n    .mock_auths(&[MockAuth {\n        address: &${1:signer},\n        invoke: &MockAuthInvoke {\n            contract: &contract_id,\n            fn_name: "${2:method}",\n            args: (${3:arg}).into_val(&env),\n            sub_invokes: &[],\n        },\n    }])\n    .${2:method}(${3:arg});',
+        sortText: "33_mock_auths"
+      },
+      // ── Token ──────────────────────────────────────────────────────────────
+      {
+        label: "token::Client::new()",
+        detail: "Construct SEP-41 token client",
+        documentation: "Creates a token client against a SAC or SEP-41 contract address. Use this to transfer, burn, or query balances across contracts.",
+        insertText: "let ${1:token} = soroban_sdk::token::Client::new(&env, &${2:token_address});",
+        sortText: "40_token_client"
+      },
+      {
+        label: "token.transfer()",
+        detail: "Transfer tokens between addresses",
+        documentation: "Transfers `amount` from `from` to `to`. The `from` address must have called `require_auth` somewhere up the call stack.",
+        insertText: "soroban_sdk::token::Client::new(&env, &${1:token_address})\n    .transfer(&${2:from}, &${3:to}, &${4:amount});",
+        sortText: "41_token_transfer"
+      },
+      {
+        label: "token.balance()",
+        detail: "Query token balance",
+        documentation: "Returns the token balance for `owner`. Returns 0 for unknown addresses \u2014 no panic.",
+        insertText: "let balance: i128 = soroban_sdk::token::Client::new(&env, &${1:token_address}).balance(&${2:owner});",
+        sortText: "42_token_balance"
+      },
+      // ── Symbols ────────────────────────────────────────────────────────────
+      {
+        label: "symbol_short!()",
+        detail: "Compile-time short Symbol (\u22649 chars)",
+        documentation: "Creates a Symbol at compile time for names up to 9 characters. Cheaper than `Symbol::new` because it is resolved at compile time with no runtime allocation.",
+        insertText: 'symbol_short!("${1:KEY}")',
+        sortText: "50_symbol_short"
+      },
+      {
+        label: "Symbol::new()",
+        detail: "Runtime Symbol (>9 chars)",
+        documentation: "Creates a Symbol at runtime. Use for names longer than 9 characters. Prefer `symbol_short!` when the name fits.",
+        insertText: 'Symbol::new(&env, "${1:long_name}")',
+        sortText: "51_symbol_new"
+      },
+      // ── Error helpers ──────────────────────────────────────────────────────
+      {
+        label: "panic_with_error!()",
+        detail: "Panic with typed contract error",
+        documentation: "Aborts execution with a structured error that clients can decode. Preferred over a bare `panic!` because it produces a typed status code.",
+        insertText: "panic_with_error!(&env, ${1:Error}::${2:Variant});",
+        sortText: "60_panic_with_error"
+      },
+      {
+        label: "log!()",
+        detail: "Diagnostic log (dev only)",
+        documentation: "Emits a diagnostic message to host output. Stripped from optimised release builds \u2014 safe to leave in code.",
+        insertText: 'log!(&env, "${1:message}", ${2:value});',
+        sortText: "61_log"
+      },
+      // ── Common patterns ────────────────────────────────────────────────────
+      {
+        label: "initialize() pattern",
+        detail: "One-shot initializer",
+        documentation: "Standard initializer that refuses to run twice. Stores an admin address and extends the instance TTL.",
+        insertText: "pub fn initialize(env: Env, ${1:admin}: Address) -> Result<(), ${2:Error}> {\n    if env.storage().instance().has(&DataKey::Admin) {\n        return Err(${2:Error}::AlreadyInitialized);\n    }\n    env.storage().instance().set(&DataKey::Admin, &${1:admin});\n    env.storage().instance().extend_ttl(${3:50}, ${4:100});\n    Ok(())\n}",
+        sortText: "70_initialize"
+      },
+      {
+        label: "DataKey enum",
+        detail: "Standard storage key enum",
+        documentation: "Convention DataKey enum covering common contract storage needs: admin, paused flag, per-address balance, and allowance map.",
+        insertText: "#[contracttype]\n#[derive(Clone)]\npub enum DataKey {\n    Admin,\n    Paused,\n    Balance(Address),\n    Allowance(Address, Address),\n    ${0}\n}",
+        sortText: "71_datakey"
+      },
+      {
+        label: "upgrade() WASM",
+        detail: "Admin-gated WASM upgrade",
+        documentation: "Standard upgrade function that replaces the contract WASM. Always requires admin auth \u2014 without it, anyone could swap your bytecode.",
+        insertText: "pub fn upgrade(env: Env, new_wasm_hash: BytesN<32>) {\n    let admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();\n    admin.require_auth();\n    env.deployer().update_current_contract_wasm(new_wasm_hash);\n}",
+        sortText: "72_upgrade"
+      }
+    ];
+    var SorobanCompletionProvider = class {
+      provideCompletionItems(document, position) {
+        const linePrefix = document.lineAt(position).text.substring(0, position.character);
+        return SOROBAN_SNIPPETS.filter((s) => this._matches(s.label, linePrefix)).map((s) => this._toCompletionItem(s));
+      }
+      _matches(label, linePrefix) {
+        const lastWord = linePrefix.match(/[\w#!:]+$/)?.[0] ?? "";
+        if (!lastWord)
+          return true;
+        return label.toLowerCase().startsWith(lastWord.toLowerCase()) || label.replace(/[#\[\]!:]/g, "").toLowerCase().startsWith(lastWord.toLowerCase());
+      }
+      _toCompletionItem(def) {
+        const item = new vscode2.CompletionItem(def.label, vscode2.CompletionItemKind.Snippet);
+        item.detail = def.detail;
+        item.documentation = new vscode2.MarkdownString(`**${def.label}**
+
+${def.documentation}`);
+        item.insertText = new vscode2.SnippetString(def.insertText);
+        item.sortText = def.sortText;
+        item.preselect = false;
+        item.filterText = def.label;
+        return item;
+      }
+    };
+    exports2.SorobanCompletionProvider = SorobanCompletionProvider;
+    function registerSorobanCompletionProvider(context) {
+      const provider = new SorobanCompletionProvider();
+      const disposable = vscode2.languages.registerCompletionItemProvider(
+        { language: "rust", scheme: "file" },
+        provider,
+        // Trigger characters: '#' for attributes, '.' for method chains, '!' for macros
+        "#",
+        ".",
+        "!",
+        ":"
+      );
+      context.subscriptions.push(disposable);
+      return disposable;
+    }
+    exports2.registerSorobanCompletionProvider = registerSorobanCompletionProvider;
+  }
+});
+
+// out/services/SecretSyncService.js
+var require_SecretSyncService = __commonJS({
+  "out/services/SecretSyncService.js"(exports2) {
+    "use strict";
+    var __createBinding2 = exports2 && exports2.__createBinding || (Object.create ? function(o, m, k, k2) {
+      if (k2 === void 0)
+        k2 = k;
+      var desc = Object.getOwnPropertyDescriptor(m, k);
+      if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+        desc = { enumerable: true, get: function() {
+          return m[k];
+        } };
+      }
+      Object.defineProperty(o, k2, desc);
+    } : function(o, m, k, k2) {
+      if (k2 === void 0)
+        k2 = k;
+      o[k2] = m[k];
+    });
+    var __setModuleDefault2 = exports2 && exports2.__setModuleDefault || (Object.create ? function(o, v) {
+      Object.defineProperty(o, "default", { enumerable: true, value: v });
+    } : function(o, v) {
+      o["default"] = v;
+    });
+    var __importStar2 = exports2 && exports2.__importStar || function(mod) {
+      if (mod && mod.__esModule)
+        return mod;
+      var result = {};
+      if (mod != null) {
+        for (var k in mod)
+          if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k))
+            __createBinding2(result, mod, k);
+      }
+      __setModuleDefault2(result, mod);
+      return result;
+    };
+    Object.defineProperty(exports2, "__esModule", { value: true });
+    exports2.SecretSyncService = void 0;
+    var vscode2 = __importStar2(require("vscode"));
+    var SecretSyncService = class _SecretSyncService {
+      constructor(context) {
+        this.context = context;
+        this.context.subscriptions.push(this.context.secrets.onDidChange((event) => {
+          if (event.key.startsWith(_SecretSyncService.SECRET_PREFIX)) {
+            vscode2.commands.executeCommand("setContext", "stellarSuite.secretSync.hasSyncedIdentities", true);
+          }
+        }));
+      }
+      isEnabled() {
+        return vscode2.workspace.getConfiguration("stellarSuite").get("secretSync.enabled", true);
+      }
+      async listIdentities() {
+        return this.context.globalState.get(_SecretSyncService.IDENTITIES_KEY, []);
+      }
+      async storeIdentity(identity, privateKey) {
+        if (!this.isEnabled() || !privateKey.trim()) {
+          return;
+        }
+        const identities = await this.listIdentities();
+        const nextIdentity = {
+          ...identity,
+          updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+        };
+        const existingIndex = identities.findIndex((item) => item.publicKey === identity.publicKey || item.name === identity.name);
+        if (existingIndex >= 0) {
+          identities[existingIndex] = nextIdentity;
+        } else {
+          identities.push(nextIdentity);
+        }
+        await this.context.secrets.store(this.getSecretKey(identity.publicKey), privateKey.trim());
+        await this.context.globalState.update(_SecretSyncService.IDENTITIES_KEY, identities);
+        await vscode2.commands.executeCommand("setContext", "stellarSuite.secretSync.hasSyncedIdentities", identities.length > 0);
+      }
+      async getPrivateKey(publicKey) {
+        if (!this.isEnabled()) {
+          return void 0;
+        }
+        return this.context.secrets.get(this.getSecretKey(publicKey));
+      }
+      async removeIdentity(publicKey) {
+        const identities = (await this.listIdentities()).filter((identity) => identity.publicKey !== publicKey);
+        await this.context.secrets.delete(this.getSecretKey(publicKey));
+        await this.context.globalState.update(_SecretSyncService.IDENTITIES_KEY, identities);
+        await vscode2.commands.executeCommand("setContext", "stellarSuite.secretSync.hasSyncedIdentities", identities.length > 0);
+      }
+      getSecretKey(publicKey) {
+        return `${_SecretSyncService.SECRET_PREFIX}${publicKey}`;
+      }
+    };
+    exports2.SecretSyncService = SecretSyncService;
+    SecretSyncService.IDENTITIES_KEY = "stellarSuite.secretSync.identities";
+    SecretSyncService.SECRET_PREFIX = "stellarSuite.secretSync.privateKey.";
   }
 });
 
@@ -6509,6 +7126,8 @@ var sorobanCliService_1 = require_sorobanCliService();
 var LinterService_1 = require_LinterService();
 var HealthAlerts_1 = require_HealthAlerts();
 var networkStatusBar_2 = require_networkStatusBar();
+var SorobanCompletionProvider_1 = require_SorobanCompletionProvider();
+var SecretSyncService_1 = require_SecretSyncService();
 var sidebarProvider;
 async function activate(context) {
   const outputChannel = (0, outputChannel_1.getSharedOutputChannel)();
@@ -6518,6 +7137,7 @@ async function activate(context) {
     const accountBalanceProvider = new AccountBalanceView_1.AccountBalanceViewProvider(context.extensionUri);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(sidebarView_1.SidebarViewProvider.viewType, sidebarProvider), vscode.window.registerWebviewViewProvider(ContractInvokeView_1.ContractInvokeViewProvider.viewType, contractInvokeProvider), vscode.window.registerWebviewViewProvider(AccountBalanceView_1.AccountBalanceViewProvider.viewType, accountBalanceProvider));
     (0, OpenInWebIDE_1.registerOpenInWebIDECommand)(context);
+    const secretSyncService = new SecretSyncService_1.SecretSyncService(context);
     outputChannel.appendLine("[Extension] Checking for Stellar CLI in PATH...");
     const cliPath = await sorobanCliService_1.SorobanCliService.findCliPath();
     if (!cliPath) {
@@ -6537,6 +7157,7 @@ async function activate(context) {
         context.subscriptions.push(healthAlerts);
       }
     }
+    (0, SorobanCompletionProvider_1.registerSorobanCompletionProvider)(context);
     const linter = new LinterService_1.SorobanLinterService();
     linter.register(context);
     context.subscriptions.push(linter);
@@ -6566,9 +7187,9 @@ async function activate(context) {
     const switchNetworkCommand = vscode.commands.registerCommand("stellarSuite.switchNetwork", () => {
       return (0, switchNetwork_1.switchNetwork)();
     });
-    const keysGenerateCommand = vscode.commands.registerCommand("stellarSuite.keysGenerate", () => (0, keyManager_1.keysGenerate)());
+    const keysGenerateCommand = vscode.commands.registerCommand("stellarSuite.keysGenerate", () => (0, keyManager_1.keysGenerate)(secretSyncService));
     const keysFundCommand = vscode.commands.registerCommand("stellarSuite.keysFund", () => (0, keyManager_1.keysFund)());
-    const keysListCommand = vscode.commands.registerCommand("stellarSuite.keysList", () => (0, keyManager_1.keysList)());
+    const keysListCommand = vscode.commands.registerCommand("stellarSuite.keysList", () => (0, keyManager_1.keysList)(secretSyncService));
     const generateBindingsCommand = vscode.commands.registerCommand("stellarSuite.generateBindings", (item) => {
       return (0, generateBindings_1.generateBindings)(item);
     });
